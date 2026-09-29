@@ -12,6 +12,9 @@ export function enemyFor(level,kills){
   armored:{name:'松果甲虫',label:'护甲 · 减伤 25%',armor:.25,coinMultiplier:1.5},
   boss:{name:'古木守卫',label:'BOSS',armor:0,coinMultiplier:5},
  }[kind];
- return {kind,level,...info,hp:Math.min(1e120,Math.round(baseHealth(level)*(kind==='boss'?4.5:1)))};
+ const elite=level>=4&&[2,5].includes(kills)?['regen','fury','barrier'][(level+Math.floor(kills/3))%3]:undefined;
+ const traits={regen:'再生 · 每 2 秒回复 8% 生命',fury:'狂暴 · 伤害 +30% / 攻击更快',barrier:'护盾 · 额外 25% 生命护盾'};
+ return {kind,level,...info,...(elite?{elite,name:`${{regen:'再生',fury:'狂暴',barrier:'护盾'}[elite]}${info.name}`,label:traits[elite],coinMultiplier:1.8}:{}),hp:Math.min(1e120,Math.round(baseHealth(level)*(kind==='boss'?4.5:elite?1.15:1)))};
 }
 export function damageToEnemy(damage,enemy){return Math.max(1,Math.floor(damage*(1-enemy.armor)));}
+export function encounterFor(s){return s.dailyRule==='bossrush'?{...enemyFor(5,9),level:s.level,hp:Math.round(baseHealth(s.level)*4.5)}:enemyFor(s.level,s.kills);}

@@ -41,6 +41,7 @@ export class ForestScene {
       this.attackAmount=event.healthDamage>0?`−${Math.ceil(event.healthDamage)} 生命`:`−${Math.ceil(event.shieldDamage)} 护盾`;
       this.shieldBroken=!!event.shieldBroken;this.shieldContact=event.shieldDamage>0;
     }
+    if(event.type==='enemy-heal')this.particles.push({type:'shield-charge',x:750,y:g-230,text:`再生 +${compact(event.amount)}`,life:0,duration:.8});
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
       this.targetEnemy??=event.targetEnemy;
@@ -59,7 +60,7 @@ export class ForestScene {
       this.hitFlash=1;this.shake=['shotgun','rocket'].includes(event.gun)?1.3:event.gun==='smg'?.3:.65;
       const existing=event.gun==='smg'&&this.particles.find(p=>p.type==='number'&&p.targetId===event.targetId&&p.gun==='smg'&&p.life<.22);
       if(existing){existing.damage+=event.damage;existing.text=`−${compact(existing.damage)}`;existing.life=0;}
-      else this.particles.push({type:'number',targetId:event.targetId,gun:event.gun,damage:event.damage,x:749+(Math.random()-.5)*60,y:g-195-Math.random()*35,text:`${event.bonus?(event.gun==='sniper'?'猎王 ':'收割 '):''}−${compact(event.damage)}`,life:0,duration:.65});
+      else this.particles.push({type:'number',targetId:event.targetId,gun:event.gun,damage:event.damage,x:749+(Math.random()-.5)*60,y:g-195-Math.random()*35,text:`${event.enemyShieldDamage?'破盾 ':''}${event.link?event.link+' ':''}${event.bonus?(event.gun==='sniper'?'猎王 ':'收割 '):''}−${compact(event.damage)}`,life:0,duration:.65});
       if(!this.reduceMotion){this.particles.push({type:'spark',x:750,y:g-138,life:0,duration:event.gun==='rocket'?.26:.16,size:['shotgun','rocket'].includes(event.gun)?30:16,color:TYPES[event.gun].color});}
     }
     if (event.type === 'kill') {
@@ -114,16 +115,16 @@ export class ForestScene {
     c.translate(760,g+3);c.scale(1-entry*.1,1-entry*.08);c.translate(-760,-g-3);
     const visualTarget=this.impacts.targetId??targetId(s),attackView=attackPresentation(s,visualTarget);
     if(this.hitFlash>0)c.filter=`brightness(${1+this.hitFlash*.65})`;
-    if(s.challenge)this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t,attackView);
+    if(s.challenge&&s.challenge.kind!=='daily')this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t,attackView);
     c.restore();
-    drawCompanion(c,s.activePet,388,g+20,t,this.reduceMotion);
+    drawCompanion(c,s.challenge?.kind==='daily'?null:s.activePet,388,g+20,t,this.reduceMotion);
     const cats=stats(s).cats, positions=this.positions();
     for(const i of [2,1,0]) {
       const p=positions[i];
       if(cats[i]) this.cat(p.x,p.y,p.scale,i,cats[i].type,t);
       else this.emptySpot(p.x,p.y,p.scale,i);
     }
-    this.drawDefense(s,g,t,attackView);
+    this.drawDefense(s.challenge?.kind==='daily'?s.challenge.run:s,g,t,attackView);
     for(const p of this.particles) {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();

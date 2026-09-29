@@ -9,6 +9,11 @@ function face(c,y,wide=1){
 }
 export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false,attackView=null){
  c.save();c.translate(x+(reduce?0:Math.sin(time*75)*shake*4),y);
+ if(enemy.elite){
+  const color={regen:'#6ca277',fury:'#d37845',barrier:'#609cbd'}[enemy.elite];
+  c.save();c.strokeStyle=color;c.lineWidth=4;c.globalAlpha=.65;c.beginPath();c.ellipse(0,-99,106,135,0,0,Math.PI*2);c.stroke();
+  c.fillStyle=color;c.font='bold 24px sans-serif';c.textAlign='center';c.fillText({regen:'✚',fury:'⚡',barrier:'⬡'}[enemy.elite],0,-245);c.restore();
+ }
  ellipse(c,0,3,enemy.kind==='boss'?95:69,15,'#6c805b35');
  const bounce=reduce?0:Math.sin(time*(enemy.kind==='boss'?1.8:3.5))*3;
  c.translate(0,bounce);

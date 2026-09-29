@@ -10,7 +10,7 @@ test('v1 migration backs up exact original and preserves every existing progress
  const r=loadGame(db);assert.equal(r.blocked,false);assert.equal(r.migrated,true);
  for(const k of ['coins','gems','crystals','level','bestEver','bestThisRun','inventory','equipment','upgrades'])assert.deepEqual(r.state[k],old[k]);
  assert.equal(r.state.fish,0);assert.deepEqual(r.state.pets,{squirrel:0,bird:0,raccoon:0});
- assert.equal(db.getItem(`${SAVE_KEY}.backup-v1`),raw);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,3);
+ assert.equal(db.getItem(`${SAVE_KEY}.backup-v1`),raw);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,4);
  const again=loadGame(db);assert.equal(again.migrated,undefined);assert.equal(db.getItem(`${SAVE_KEY}.backup-v1`),raw);
 });
 test('backup failure leaves v1 untouched and blocks automatic overwrite',()=>{

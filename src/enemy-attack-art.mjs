@@ -12,7 +12,8 @@ const oval=(c,x,y,rx,ry,color)=>{c.fillStyle=color;c.beginPath();c.ellipse(x,y,r
 // Flight uses the final portion of the simulation warning: arrival and damage
 // share a deadline. Nothing is launched after damage or from a stale encounter.
 export function attackPresentation(s,visibleTarget){
- if(s.status!=='playing'||s.challenge||visibleTarget!==`tree-${s.totalKills}`)return null;
+ if(s.challenge?.kind==='daily')return attackPresentation(s.challenge.run,visibleTarget);
+ if(s.status!=='playing'||s.challenge||visibleTarget!==`${s.dailyRule?'daily':'tree'}-${s.totalKills}`)return null;
  const attack=enemyAttack(s),style=ATTACK_STYLES[attack.enemy.kind],remaining=attack.cycle-s.survival.bossTime;
  const phase=remaining>attack.windup?'idle':remaining>style.flight?'windup':'flight';
  return {kind:attack.enemy.kind,enraged:attack.enraged,style,phase,progress:clamp(1-remaining/style.flight),

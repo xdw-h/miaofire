@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame, advance, targetHealth,TYPES} from '../src/game.mjs';
+import {createGame, advance, targetHealth,TYPES,startDaily} from '../src/game.mjs';
 import {ForestScene} from '../src/scene.mjs';
 
 function makeScene(t) {
@@ -48,6 +48,12 @@ function crossLevel(scene) {
   assert.equal(state.level, 6, 'the simulation has already advanced to the next stage');
   return state;
 }
+test('daily boss uses real enemy art and retaliatory flight instead of material dummy',t=>{
+ const {scene,rendered}=makeScene(t),s=createGame();s.bestEver=3;startDaily(s,new Date(2026,8,3,12));
+ let dummy=false,flight=false;scene.dummy=()=>dummy=true;scene.attackFlight=view=>{if(view.phase==='flight')flight=true;};
+ for(let i=0;i<2.5*120;i++)for(const e of advance(s,1/120))scene.event(e);
+ scene.draw(s,.2,false);assert.equal(dummy,false);assert.equal(rendered.at(-1).kind,'boss');assert.equal(flight,true);
+});
 
 test('last projectile retains the old stage tree until its delayed kill arrives', t => {
   const {scene, rendered} = makeScene(t), state = crossLevel(scene);

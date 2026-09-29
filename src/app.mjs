@@ -10,6 +10,13 @@ import {isBossStage,difficultyLabel} from './enemies.mjs';
 import {defenseStats,enemyCharging,enemyAttack,shieldRecovery,SHIELD_DELAY} from './survival.mjs';
 import {MILESTONES,CHALLENGES,petBonus,claimPet,carryPet,feedPet,claimMilestone,availableRewards} from './progression.mjs';
 import {petsPanel,challengesPanel,companionLabel} from './progression-ui.mjs';
+import {BLESSINGS,chooseBlessing} from './blessings.mjs';
+import {activeLinks} from './combat-effects.mjs';
+import {SKILLS} from './skills.mjs';
+import {castSkill,startDaily} from './game.mjs';
+import {dailyPanel,linksGuide,DAILY_RULES} from './expedition-ui.mjs';
+import {dailyAvailable,localDate} from './daily.mjs';
+const actor=()=>state.challenge?.kind==='daily'?state.challenge.run:state;
 
 let storage;
 try { storage = window.localStorage; } catch { storage = {getItem(){throw Error('Unavailable');},setItem(){throw Error('Unavailable');}}; }
@@ -54,10 +61,13 @@ $('#app').innerHTML = `
           <div class="defense-meters"><div class="defense-meter health-meter"><div>${icon('health')}<span>生命</span><strong id="team-hp">100 / 100</strong></div><div class="defense-track" id="team-hp-track" role="progressbar" aria-label="小队生命" aria-valuemin="0" aria-valuemax="100"><i id="team-hp-fill"></i></div></div><div class="defense-meter shield-meter"><div>${icon('shield')}<span>护盾</span><strong id="team-shield">60 / 60</strong></div><div class="defense-track" id="team-shield-track" role="progressbar" aria-label="小队护盾" aria-valuemin="0" aria-valuemax="100"><i id="team-shield-fill"></i></div></div></div>
           <div class="boss-warning" id="boss-warning"><strong id="boss-warning-title">护盾优先吸收伤害</strong><span id="boss-warning-copy">进入新关或重试时恢复满状态</span><div class="charge-track" id="charge-track" hidden><i id="charge-fill"></i></div></div>
           <div class="defense-feedback" id="defense-feedback" role="status" aria-live="polite" hidden></div>
+          <div class="skill-row">${Object.entries(SKILLS).map(([id,k])=>`<button class="skill-button" data-action="skill" data-id="${id}" id="skill-${id}" title="${k.desc}"><b>${k.symbol} ${k.name}</b><small>就绪</small></button>`).join('')} </div><div class="skill-help">护盾 +50% · 爆发伤害 +60% / 5 秒 · 急救生命 +25%，不消耗鱼干</div>
         </section>
         <div class="progress-strip"><div class="progress-heading"><b id="progress-label">本关进度 · 0 / 10</b><span id="stage-reward">通关 <b>+10 钻石 · +3 鱼干</b></span></div><div class="stage-path" id="stage-path" aria-hidden="true">${Array.from({length:10},(_,i)=>`<span class="path-stop${i===9?' finish':''}">${i===9?icon('gem'):''}</span>`).join('')}</div></div>
       </div>
       <div id="boss-report" class="boss-report" role="status" hidden></div>
+      <button class="companion-strip blessing-strip" data-action="blessings"><span>✦ 远征祝福</span><span id="blessing-summary">每过 3 关，三选一强化</span>${icon('arrow')}</button>
+      <button class="tactic-strip" data-action="links" id="tactic-strip" aria-label="查看武器联动"></button>
       <div class="squad-row" id="squad" aria-label="出战小队"></div>
       <button class="companion-strip" data-action="tab" data-tab="pets">${icon('paw')}<span id="companion-label">邀请伙伴，让远征更有底气</span><span id="pet-notification"></span>${icon('arrow')}</button>
       <div class="challenge-banner" id="challenge-banner" hidden><span>补给挑战中 · 主线已暂停</span><button class="secondary-button" data-action="challenge-exit">退出挑战</button></div>
@@ -119,6 +129,13 @@ function showDialog(title, content, handler=null) {
   dialog.showModal();updateHUD();
 }
 function closeDialog(){dialog.close();dialogHandler=null;updateHUD();}
+function blessingsDialog(){
+ const e=state.expedition;
+ const owned=Object.entries(BLESSINGS).filter(([id])=>e.choices.includes(id)).map(([id,b])=>`<li><b>${b.name} ×${e.choices.filter(v=>v===id).length}</b> · ${b.desc}</li>`).join('');
+ showDialog(e.pending?`第 ${e.pending.stage} 关奖励 · 选择祝福`:'本轮远征祝福',`<p>主线专属，可叠加；重试和刷新保留，转生清空。</p>${e.pending?`<div class="blessing-choices">${e.pending.options.map(id=>`<button class="blessing-choice" data-modal="blessing" data-id="${id}"><span>${BLESSINGS[id].symbol}</span><b>${BLESSINGS[id].name}</b><small>${BLESSINGS[id].desc}</small></button>`).join('')}</div><p class="muted-copy">选好后继续战斗。关闭弹窗也会保留选项并暂停主线。</p>`:'<p>每通过 3 关获得一次三选一机会。</p>'}${owned?`<ul class="blessing-owned">${owned}</ul>`:''}`,(action,button)=>{
+  if(action==='blessing'){const result=chooseBlessing(state,button.dataset.id);if(result.ok)closeDialog();actionResult(result);}
+ });
+}
 dialog.addEventListener('click',e=>{
   const target=e.target.closest('button');
   if(target?.dataset.modal){dialogHandler?.(target.dataset.modal,target);}
@@ -143,9 +160,9 @@ $('.tabs').addEventListener('keydown',e=>{
   e.preventDefault();setTab(tabs[i]);$(`#tab-${tabs[i]}`).focus();
 });
 function upgradeDetail(kind) {
-  const s=stats(state);
+  const s=stats({...state,challenge:null});
   if(kind==='attack')return `伤害 ×${decimal(s.attack)} <em>→ ×${decimal(s.attack*1.22)}</em>`;
-  if(kind==='speed')return `射速 ×${s.speed.toFixed(2)} <em>→ ×${(s.speed+.07*petBonus(state).speed).toFixed(2)}</em>`;
+  if(kind==='speed')return `射速 ×${s.speed.toFixed(2)} <em>→ ×${(s.speed/(1+state.upgrades.speed*.07)*(1+(state.upgrades.speed+1)*.07)).toFixed(2)}</em>`;
   if(kind==='health'){const n=defenseStats(state).maxHp;return `生命 ${n} <em>→ ${n+20}</em>`;}
   if(kind==='shield'){const n=defenseStats(state).maxShield;return `护盾 ${n} <em>→ ${n+15}</em>`;}
   return `收益 ×${s.income.toFixed(2)} <em>→ ×${(s.income+.16*petBonus(state).income).toFixed(2)}</em>`;
@@ -158,9 +175,9 @@ function renderPanel() {
   } else if(selectedTab==='pets'){
     $('#panel-body').innerHTML=petsPanel(state);
   } else if(selectedTab==='challenges'){
-    $('#panel-body').innerHTML=challengesPanel(state);
+    $('#panel-body').innerHTML=dailyPanel(state)+challengesPanel(state);
   } else {
-    $('#panel-body').innerHTML=`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>新的起点，更强的你</h3><p>把这趟旅途化成紫晶，<br>带着永久的力量再次出发。</p><div class="rebirth-stats"><div><strong id="rebirth-reward">+${rebirthReward(state)}</strong><span>本次可得紫晶</span></div><div><strong>+${decimal(state.crystals*10)}%</strong><span>现有永久攻击加成</span></div></div><button class="primary-button wide" data-action="rebirth" id="rebirth-button">${icon('refresh')}开始转生</button><div class="rebirth-note"><b>保留</b> 武器、装备、钻石、紫晶、伙伴和鱼干<br><b>重置</b> 金币、金币升级和当前关卡<br>每通过 3 关获得 1 颗紫晶，每颗永久增加 10% 基础攻击力。</div></div>`;
+    $('#panel-body').innerHTML=`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>新的起点，更强的你</h3><p>把这趟旅途化成紫晶，<br>带着永久的力量再次出发。</p><div class="rebirth-stats"><div><strong id="rebirth-reward">+${rebirthReward(state)}</strong><span>本次可得紫晶</span></div><div><strong>+${decimal(state.crystals*10)}%</strong><span>现有永久攻击加成</span></div></div><button class="primary-button wide" data-action="rebirth" id="rebirth-button">${icon('refresh')}开始转生</button><div class="rebirth-note"><b>保留</b> 武器、装备、钻石、紫晶、伙伴和鱼干<br><b>重置</b> 金币、金币升级、当前关卡和远征祝福<br>每通过 3 关获得 1 颗紫晶，每颗永久增加 10% 基础攻击力。</div></div>`;
   }
   updateButtons();
   if(state.challenge){
@@ -175,8 +192,10 @@ function weaponCard(w) {
   return `<article class="weapon-card${equipped?' equipped':''}" data-weapon="${w.id}"><div class="weapon-card-top"><span class="tier t${w.tier}">${TIERS[w.tier]}</span><span class="equip-tag">${equipped?`队员 ${slot+1} · 出战中`:'待命'}</span></div>${weaponSvg(w.type,w.tier)}<h4>${TYPES[w.type].name}</h4><span class="weapon-role">${TYPES[w.type].role}</span><p>基础秒伤 ${decimal(weaponPower(state,w).dps)}</p><p class="weapon-trait">${weaponTrait(w)}</p><div class="weapon-actions"><button class="small-button" data-action="${equipped?'unequip':'equip'}" data-id="${w.id}" data-slot="${slot}" aria-label="${equipped?'卸下':'装备'}${TIERS[w.tier]}级${TYPES[w.type].name}">${equipped?'卸下':'装备'}</button><button class="small-button merge" data-action="merge" data-id="${w.id}" ${canMerge?'':'disabled'} title="${canMerge?'消耗两把同款同级武器，随机获得更高一级武器':mergeReason}" aria-label="合成${TIERS[w.tier]}级${TYPES[w.type].name}">合成</button></div></article>`;
 }
 function renderSquad() {
-  $('#squad').innerHTML=state.equipment.map((id,i)=>{
-    const w=state.inventory.find(w=>w.id===id);
+  const a=actor();
+  $('#squad').innerHTML=a.equipment.map((id,i)=>{
+    const w=a.inventory.find(w=>w.id===id);
+    if(!w&&state.challenge?.kind==='daily')return '<div class="squad-slot empty-slot"><span>双猫挑战 · 此位置休息</span></div>';
     return w?`<div class="squad-slot">${weaponSvg(w.type,w.tier)}<div><span class="slot-title">队员 ${i+1} · 出战中</span><b>${TYPES[w.type].short}<small>${TIERS[w.tier]} 级</small></b></div></div>`:`<button class="squad-slot empty-slot" data-action="tab" data-tab="weapons" aria-label="为第${i+1}只猫装备武器"><div class="empty-icon">${icon('plus')}</div><div><span class="slot-title">队员 ${i+1}</span><b>装备以出战</b></div></button>`;
   }).join('');
 }
@@ -194,39 +213,42 @@ function updateHUD() {
   $('#coins').textContent=money(state.coins);$('#gems').textContent=money(state.gems);$('#crystals').textContent=money(state.crystals);
   $('#fish').textContent=money(state.fish);
   if(selectedTab==='pets')for(const m of MILESTONES){const el=$(`[data-milestone-progress="${m.id}"]`);if(el)el.textContent=`${Math.min(m.target,state[m.field])} / ${m.target} · 奖励 ${m.reward} 鱼干`;}
-  $('#companion-label').textContent=companionLabel(state);
+  $('#companion-label').textContent=state.challenge?.kind==='daily'?'每日试用小队 · 不带入伙伴加成':companionLabel(state);
   const rewards=availableRewards(state);$('#pet-notification').textContent=rewards?`${rewards} 可领取`:'';
   $('#tab-pets').classList.toggle('has-rewards',rewards>0);
-  const challenge=state.challenge,battle=battleState(state),enemy=currentEnemy(state),reward=stageReward(state.level);
+  const challenge=state.challenge,battle=battleState(state),enemy=currentEnemy(state),reward=stageReward(state.level),daily=challenge?.kind==='daily',a=actor();
+  updateTactics();
   updateDefenseHUD(enemy);
   $('.scene-wrap').classList.toggle('boss-battle',enemy.kind==='boss');
   $('.tree-label').classList.toggle('armored-target',enemy.kind==='armored');
-  $('#enemy-trait').textContent=enemyAttack(state)?.enraged?'BOSS · 狂暴 +40%':enemy.label;
+  $('#enemy-trait').textContent=(enemyAttack(state)?.enraged?'BOSS · 狂暴 +40%':enemy.label)+(enemy.elite==='barrier'?` · 剩余护盾 ${money(battle.combat.target===undefined||battle.combat.target===null?Math.ceil(enemy.hp*.25):battle.combat.enemyShield)}`:'');
   $('#challenge-banner').hidden=!challenge;
+  $('#challenge-banner>span').textContent=daily?'每日挑战中 · 主线已暂停':'补给挑战中 · 主线已暂停';
   const chapter=state.level<=3?'初入松林':state.level<=6?'林间深处':state.level<=10?'风语山谷':'无尽林海';
-  $('#stage-title').textContent=challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
-  $('#stage-sub').textContent=challenge?'集中火力！30 秒内击破训练木偶':enemy.kind==='boss'?'古木守卫现身 · 集中火力拿下丰厚补给':isBossStage(state.level)?'本关第 10 波：古木守卫 BOSS':enemy.kind==='armored'?'松果硬壳抵消 25% 伤害 · 升级火力击破它':`距离 BOSS 关还有 ${5-state.level%5} 关`;
-  const seconds=Math.max(0,Math.ceil((challenge?30:60)-battle.elapsed));$('#timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+  $('#stage-title').textContent=daily?`每日 · ${DAILY_RULES[challenge.rule].name}`:challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
+  $('#stage-sub').textContent=daily?`${challenge.date} · 固定试用小队 · 技能可用`:challenge?'集中火力！30 秒内击破训练木偶':enemy.kind==='boss'?'古木守卫现身 · 集中火力拿下丰厚补给':isBossStage(state.level)?'本关第 10 波：古木守卫 BOSS':enemy.kind==='armored'?'松果硬壳抵消 25% 伤害 · 升级火力击破它':`距离 BOSS 关还有 ${5-state.level%5} 关`;
+  const seconds=Math.max(0,Math.ceil((challenge&&!daily?30:60)-battle.elapsed));$('#timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
   $('#timer-wrap').classList.toggle('urgent',seconds<=10);
   const health=targetHealth(state),ratio=battle.hp/health*100;
   $('#health-fill').style.width=`${ratio}%`;$('#health-track').setAttribute('aria-valuenow',Math.round(ratio));
   $('#health-track').setAttribute('aria-label',`${enemy.name}剩余生命`);
   $('#health-number').textContent=`${money(battle.hp)} / ${money(health)}`;
   $('#tree-name').textContent=enemy.name;
-  $('#tree-index').textContent=challenge?'精英目标':enemy.kind==='boss'?'BOSS · 10 / 10':`${state.kills+1} / 10`;
-  $('#progress-label').textContent=challenge?`已造成伤害 · ${Math.round(100-ratio)}%`:`本关进度 · ${state.kills} / 10`;
-  $('#stage-reward').textContent=challenge?`胜利奖励 +${challenge.status==='won'?challenge.reward:challengeReward(state,challenge.tier)} 鱼干`:`通关 +${reward.gems} 钻石 · +${reward.fish} 鱼干`;
+  $('#tree-index').textContent=daily?`${Math.min(challenge.target,battle.kills+1)} / ${challenge.target}`:challenge?'精英目标':enemy.kind==='boss'?'BOSS · 10 / 10':`${state.kills+1} / 10`;
+  $('#progress-label').textContent=daily?`今日进度 · ${battle.kills} / ${challenge.target}`:challenge?`已造成伤害 · ${Math.round(100-ratio)}%`:`本关进度 · ${state.kills} / 10`;
+  $('#stage-reward').textContent=daily?(challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:dailyAvailable(state,challenge.date)?'首胜 +20 钻石 · +40 鱼干':'今日奖励已领取 · 练习中'):challenge?`胜利奖励 +${challenge.status==='won'?challenge.reward:challengeReward(state,challenge.tier)} 鱼干`:`通关 +${reward.gems} 钻石 · +${reward.fish} 鱼干`;
   $('#stage-path').hidden=!!challenge;
   document.querySelectorAll('.path-stop').forEach((el,i)=>{el.classList.toggle('done',i<state.kills);el.classList.toggle('current',i===state.kills);el.classList.toggle('boss-stop',!challenge&&isBossStage(state.level)&&i===9);});
   const powers=stats(state);$('#dps').textContent=decimal(powers.dps);$('#total-kills').textContent=money(state.totalKills);$('#best').textContent=state.bestEver;
-  $('#squad-count').textContent=`${state.equipment.filter(Boolean).length} / 3 出战`;
-  $('#no-cats').hidden=state.equipment.some(Boolean);
+  $('#squad-count').textContent=`${a.equipment.filter(Boolean).length} / ${daily&&challenge.rule==='duo'?2:3} ${daily?'试用出战':'出战'}`;
+  $('#no-cats').hidden=a.equipment.some(Boolean);
   const failed=battle.status==='failed'||battle.status==='won';
   $('#battle-overlay').hidden=!failed&&!manualPause;
-  if(failed&&challenge){$('#overlay-title').textContent=challenge.status==='won'?'补给挑战成功！':'木偶还站着，再变强一点';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 鱼干，奖励已保存`:'本次未获得奖励，返回主线升级火力后再来';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').innerHTML=`查看结算 ${icon('arrow')}`;}
+  if(failed&&daily){$('#overlay-title').textContent=challenge.status==='won'?'每日挑战完成':'每日挑战结束';$('#overlay-copy').textContent=challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:'尝试在敌人重击前补盾，保留爆发应对 Boss。';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').textContent='查看结算';}
+  else if(failed&&challenge){$('#overlay-title').textContent=challenge.status==='won'?'补给挑战成功！':'木偶还站着，再变强一点';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 鱼干，奖励已保存`:'本次未获得奖励，返回主线升级火力后再来';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').innerHTML=`查看结算 ${icon('arrow')}`;}
   else if(failed){$('#overlay-title').textContent=state.failureReason==='defeat'?'小队生命耗尽':enemy.kind==='boss'?'古木守卫挡住了去路':'这个对手有点顽强';$('#overlay-copy').textContent=state.failureReason==='defeat'?'已获得的资源会保留。强化生命和护盾，再满状态挑战本关！':'时间用尽。已获得的资源会保留，升级火力后再来一次！';$('#overlay-action').dataset.action='retry';$('#overlay-action').innerHTML=`再试一次 ${icon('refresh')}`;}
   else {$('#overlay-title').textContent='猫咪休息中';$('#overlay-copy').textContent='伸个懒腰，冒险等你回来。';$('#overlay-action').dataset.action='resume';$('#overlay-action').innerHTML=`继续冒险 ${icon('play')}`;}
-  $('#live-label').textContent=failed?'等待再次出发':manualPause||dialog.open?'猫咪休息中':'自动战斗中';
+  $('#live-label').textContent=failed?'等待再次出发':state.expedition.pending?'等待选择祝福':manualPause||dialog.open?'猫咪休息中':'自动战斗中';
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
@@ -239,18 +261,35 @@ function syncSound(){
   const volume=$('#audio-volume-value');if(volume)volume.textContent=`${Math.round(gameAudio.volume*100)}%`;
 }
 function updateDefenseHUD(enemy){
-  const v=state.survival,d=defenseStats(state),attack=enemyAttack(state),charging=enemyCharging(state),active=!!attack&&state.status==='playing';
-  $('#difficulty-label').textContent=`小队防线 · ${difficultyLabel(state.level)}`;
+  $('#blessing-summary').textContent=state.expedition.pending?'待选择 · 战斗已暂停':`${state.expedition.choices.length} 层祝福 · 查看效果`;
+  $('.blessing-strip').classList.toggle('pending',!!state.expedition.pending);
+  const a=actor(),material=!!state.challenge&&state.challenge.kind!=='daily',v=a.survival,d=defenseStats(a),attack=enemyAttack(state),charging=enemyCharging(state),active=!!attack&&a.status==='playing';
+  $('#difficulty-label').textContent=state.challenge?.kind==='daily'?'试用小队防线':`小队防线 · ${difficultyLabel(state.level)}`;
   for(const [key,value,max]of [['hp',v.hp,d.maxHp],['shield',v.shield,d.maxShield]]){
     $(`#team-${key}`).textContent=`${decimal(value)} / ${max}`;
     $(`#team-${key}-fill`).style.width=`${value/max*100}%`;$(`#team-${key}-track`).setAttribute('aria-valuenow',Math.round(value/max*100));
   }
   $('.defense-panel').classList.toggle('low-health',v.hp/d.maxHp<=.3);
-  $('#shield-status').textContent=state.challenge?'主线防线已暂停':state.status==='failed'?'重试后满状态恢复':manualPause||dialog.open?'防线计时已暂停':v.shield>=d.maxShield?`护盾就绪 · 回盾 ${shieldRecovery(state)}/秒`:v.damageAgo<SHIELD_DELAY?`${Math.max(0,SHIELD_DELAY-v.damageAgo).toFixed(1)} 秒后回盾`:`护盾恢复中 · 每秒 +${shieldRecovery(state)}`;
+  $('#shield-status').textContent=material?'主线防线已暂停':a.status==='failed'?'重试后满状态恢复':manualPause||dialog.open?'防线计时已暂停':v.shield>=d.maxShield?`护盾就绪 · 回盾 ${shieldRecovery(a)}/秒`:v.damageAgo<SHIELD_DELAY?`${Math.max(0,SHIELD_DELAY-v.damageAgo).toFixed(1)} 秒后回盾`:`护盾恢复中 · 每秒 +${shieldRecovery(a)}`;
   $('#boss-warning').classList.toggle('charging',charging);
   $('#charge-track').hidden=!active;$('#charge-fill').style.width=`${attack?v.bossTime/attack.cycle*100:0}%`;
-  $('#boss-warning-title').textContent=state.challenge?'训练木偶不会反击':state.status==='failed'?state.failureReason==='defeat'?'防线失守 · 强化后再挑战':'本关时间用尽':attack?.enraged?`狂暴！${charging?'重击蓄力中':'攻击 +40%'}`:charging?`${enemy.name}蓄力中！`:`${enemy.name}正在准备攻击`;
-  $('#boss-warning-copy').textContent=active?`${Math.max(0,attack.cycle-v.bossTime).toFixed(1)} 秒后${attack.boss?'重击':'反击'} · ${attack.damage} 点伤害`:state.challenge?'返回主线后继续之前的生命、护盾和蓄力进度':'重试恢复生命和护盾，回到本关第一波';
+  $('#boss-warning-title').textContent=material?'训练木偶不会反击':a.status==='failed'?a.failureReason==='defeat'?'防线失守 · 强化后再挑战':'本关时间用尽':attack?.enraged?`狂暴！${charging?'重击蓄力中':'攻击 +40%'}`:charging?`${enemy.name}蓄力中！`:`${enemy.name}正在准备攻击`;
+  $('#boss-warning-copy').textContent=active?`${Math.max(0,attack.cycle-v.bossTime).toFixed(1)} 秒后${attack.boss?'重击':'反击'} · ${attack.damage} 点伤害`:material?'返回主线后继续之前的生命、护盾和蓄力进度':'重试恢复生命和护盾，回到本关第一波';
+  if(state.challenge?.kind==='daily'&&a.status!=='playing'){
+    $('#shield-status').textContent='挑战已结束 · 防线停止计时';
+    $('#boss-warning-title').textContent=a.status==='won'?'每日挑战完成':'每日挑战结束';
+    $('#boss-warning-copy').textContent='查看结算，返回主线或再次挑战';
+  }
+}
+function updateTactics(){
+ const a=actor(),b=battleState(state),links=activeLinks(a),c=b.combat;
+ $('#tactic-strip').textContent=links.length?links.map(l=>l.name).join(' · ')+(c.markTime>0?` · 标记 ${c.markTime.toFixed(1)}秒`:'')+(c.charge?` · 蓄能 ${c.charge}/3`:''):'武器联动 · 查看三种搭配';
+ for(const [id,k]of Object.entries(SKILLS)){
+  const el=$(`#skill-${id}`),cd=b.skills.cooldowns[id],material=!!state.challenge&&state.challenge.kind!=='daily',full=id==='shield'?a.survival.shield>=defenseStats(a).maxShield:id==='heal'?a.survival.hp>=defenseStats(a).maxHp:false;
+  el.disabled=manualPause||dialog.open||document.hidden||b.status!=='playing'||!!state.expedition.pending||cd>1e-8||id!=='burst'&&(material||full);
+  el.querySelector('small').textContent=id==='burst'&&b.skills.burst>0?`生效 ${b.skills.burst.toFixed(1)}秒`:cd>0?`冷却 ${Math.ceil(cd)}秒`:id!=='burst'&&material?'木偶无需恢复':full?'已满':'点击释放';
+  el.classList.toggle('active',id==='burst'&&b.skills.burst>0);
+ }
 }
 function clearDefenseFeedback(){$('#defense-feedback').hidden=true;}
 function revealWeapon(weapon, merged=false) {
@@ -262,10 +301,10 @@ function equip(id) {
   showDialog('选择替换的队员',`<p>三只猫咪都已出战。替换后，原武器会放回背包。</p><div class="equip-choices">${state.equipment.map((equipped,i)=>{const w=state.inventory.find(item=>item.id===equipped);return `<button class="equip-choice" data-modal="slot" data-slot="${i}">${weaponSvg(w.type,w.tier)}<div><b>队员 ${i+1} · ${TYPES[w.type].name}</b><span>${TIERS[w.tier]} 级 · 秒伤 ${decimal(weaponPower(state,w).dps)}</span></div></button>`;}).join('')}</div>`,(_,button)=>{const slot=Number(button.dataset.slot);closeDialog();actionResult(equipWeapon(state,id,slot));});
 }
 function guide() {
-  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
+  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><div class="guide-step"><span>06</span><div><b>选祝福、配联动、迎战精英</b><p>每过 3 关暂停三选一，祝福叠加到转生。弩＋狙击标记增伤；护盾枪＋火箭积累蓄能；手枪＋冲锋枪加射速。第 4 关起出现再生、狂暴和护盾精英，留意名字、光环及特性。</p></div></div><div class="guide-step"><span>07</span><div><b>手动技能与每日试炼</b><p>防线下方点击补盾、爆发和急救，冷却分别为 18、22、25 秒。急救不消耗鱼干。通过第 3 关后，在挑战页体验固定试用小队的每日规则，首胜获得 20 钻石和 40 鱼干。同日重复仅练习，主线进度会保留。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林军械库版 1.6.1<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林远征版 1.7.0<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound')toggleSound();
     if(action==='sound-test'){if(gameAudio.enabled)gameAudio.play('test');else void gameAudio.enable();}
     if(action==='reset')confirmReset();
@@ -278,6 +317,9 @@ function confirmReset() {
   });
 }
 
+function beginDaily(date=new Date()){
+ const result=startDaily(state,date);if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}actionResult(result);
+}
 function beginChallenge(tier){
   const result=startChallenge(state,tier);
   if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}
@@ -288,6 +330,9 @@ function leaveChallenge(){
 }
 function challengeResult(){
   const ch=state.challenge;if(!ch||ch.status==='playing')return;
+  if(ch.kind==='daily'){
+   showDialog(ch.status==='won'?'每日挑战完成':'防线失守，再试一次',`<div class="challenge-result"><h3>${DAILY_RULES[ch.rule].name}</h3><p>${ch.date} · 击败 ${ch.run.kills} / ${ch.target}</p><h3>+${ch.gemsReward} 钻石 · +${ch.reward} 鱼干</h3><p>${ch.status==='won'?(ch.reward?'首胜奖励已保存。':'该日期奖励已领取，本次为练习。'):'本次未获得奖励。试用小队不变，留意技能释放时机。'}</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="primary-button" data-modal="retry">再次挑战</button></div>`,choice=>{closeDialog();leaveChallenge();if(choice==='retry')beginDaily(new Date(ch.date+'T12:00:00'));});return;
+  }
   showDialog(ch.status==='won'?'鱼干补给，收下啦！':'差一点，再来一次',`<div class="challenge-result"><div class="result-icon">${icon(ch.status==='won'?'fish':'target')}</div><h3>${ch.status==='won'?`+${ch.reward} 份鱼干`:'本次未获得奖励'}</h3><p>${CHALLENGES[ch.tier].name} · 剩余 ${Math.max(0,30-ch.elapsed).toFixed(1)} 秒</p><p>${ch.status==='won'?'奖励已保存，带回营地喂养伙伴吧。':'升级攻击、合成武器，或携带松鼠再挑战。'}</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="primary-button" data-modal="retry">再次挑战</button></div>`,choice=>{
     const tier=ch.tier;closeDialog();leaveChallenge();if(choice==='retry')beginChallenge(tier);
   });
@@ -304,6 +349,10 @@ document.addEventListener('click',event=>{
   if(action==='sound')toggleSound();
   if(action==='retry'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(retry(state));}
   if(action==='guide')guide();
+  if(action==='links')showDialog('三只猫，组合更强',linksGuide());
+  if(action==='skill'&&!manualPause&&!dialog.open&&!document.hidden)actionResult(castSkill(state,id));
+  if(action==='daily-start')beginDaily();
+  if(action==='blessings')blessingsDialog();
   if(action==='settings')settings();
   if(action==='close-dialog')closeDialog();
   if(action==='pet-claim')actionResult(claimPet(state,id));
@@ -329,13 +378,14 @@ document.addEventListener('click',event=>{
   }
   if(action==='rebirth') {
     const reward=rebirthReward(state);
-    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级和当前关卡。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='confirm'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(rebirth(state));setTab('growth');}});
+    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级、当前关卡和远征祝福。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='confirm'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(rebirth(state));setTab('growth');}});
   }
 });
 
-let last=performance.now(),hudElapsed=0,saveElapsed=0,lastRewardCount=availableRewards(state);
+let last=performance.now(),hudElapsed=0,saveElapsed=0,lastRewardCount=availableRewards(state),lastDailyDate=localDate();
 function frame(now) {
   const delta=Math.min(.1,Math.max(0,(now-last)/1000));last=now;
+  const today=localDate();if(today!==lastDailyDate){lastDailyDate=today;if(selectedTab==='challenges')renderPanel();}
   gameAudio.setPaused(document.hidden);gameAudio.tick();
   const paused=manualPause||dialog.open||document.hidden||battleState(state).status!=='playing';
   if(!paused)for(const event of advance(state,delta)) {
@@ -354,9 +404,10 @@ function frame(now) {
       persist();if(['pets','challenges'].includes(selectedTab))renderPanel();if(event.level===4)notify('转生与补给挑战已解锁');
     }
     if(event.type==='failed'){persist();updateHUD();}
+    if(event.type==='blessing'){persist();blessingsDialog();}
     if(event.type==='challenge-result'){persist();renderPanel();updateHUD();challengeResult();}
   }
-  scene.draw(state,delta,manualPause||document.hidden);
+  scene.draw(state,delta,manualPause||document.hidden||dialog.open||!!state.expedition.pending);
   const rewardCount=availableRewards(state);
   if(rewardCount!==lastRewardCount){lastRewardCount=rewardCount;if(selectedTab==='pets')renderPanel();}
   hudElapsed+=delta;saveElapsed+=delta;
@@ -367,4 +418,5 @@ function frame(now) {
 document.addEventListener('visibilitychange',()=>{last=performance.now();gameAudio.setPaused(document.hidden);if(document.hidden)persist();});
 window.addEventListener('pagehide',()=>{gameAudio.setPaused(true);persist();});
 warning(loaded.warning);renderPanel();renderSquad();updateHUD();persist();requestAnimationFrame(frame);
-if(loaded.restored)notify(loaded.migrated?'旧进度已备份并升级，小队防线已就绪！':'欢迎回来！猫咪小队已经准备就绪');
+if(state.expedition.pending)blessingsDialog();
+if(loaded.restored)notify(loaded.migrated?'旧进度已备份，远征玩法已就绪！':'欢迎回来！猫咪小队已经准备就绪');

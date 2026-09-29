@@ -16,7 +16,9 @@ test('boss starts at three seconds and half-health rage strengthens damage witho
  assert.equal(run(s,3).filter(e=>e.type==='boss-strike').length,1);assert.equal(enemyAttack(s).cycle,5);
  s.hp=targetHealth(s)*.5;assert.equal(enemyAttack(s).enraged,true);assert.equal(enemyAttack(s).damage,56);assert.equal(enemyAttack(s).cycle,5);
 });
-test('ten-stage defense investment can win where an attack-only squad falls',()=>{
- const glass=squad(10,8,0),balanced=squad(10,6,4);run(glass,60);run(balanced,60);
+test('ten-stage defense investment with three earned blessings wins where attack-only falls',()=>{
+ const glass=squad(10,8,0),balanced=squad(10,6,4);
+ for(const s of [glass,balanced])s.expedition={milestone:9,pending:null,choices:['attack','speed','hunter']};
+ run(glass,60);run(balanced,60);
  assert.equal(glass.status,'failed');assert.equal(glass.failureReason,'defeat');assert.ok(balanced.level>10);
 });

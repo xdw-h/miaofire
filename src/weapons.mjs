@@ -10,7 +10,7 @@ export const TYPES = {
  ward:{name:'星萤护盾枪',short:'护盾枪',damage:4,rate:1.6,color:'#58aebe',role:'援护',description:'每次开火补充小队护盾 · 火力较低'},
 };
 export function wardCharge(tier){return Math.round(2*1.5**tier);}
-export function weaponTrait(weapon){return weapon.type==='ward'?`每次开火补盾 +${wardCharge(weapon.tier)} · 仅主线`:TYPES[weapon.type].description;}
+export function weaponTrait(weapon){return weapon.type==='ward'?`每次开火补盾 +${wardCharge(weapon.tier)} · 主线 / 每日，断补给除外`:TYPES[weapon.type].description;}
 export function resolveWeaponShot(cat,enemy,hp){
  const bonus=cat.type==='sniper'&&enemy.kind==='boss'?1.35:cat.type==='rocket'&&hp<=enemy.hp*.3?1.5:1;
  const damage=damageToEnemy(cat.damage*bonus,cat.type==='crossbow'?{armor:0}:enemy);
