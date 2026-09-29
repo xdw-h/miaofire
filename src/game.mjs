@@ -1,6 +1,8 @@
 import {progressionDefaults,petBonus,CHALLENGES} from './progression.mjs';
 import {baseHealth,enemyFor,stageReward,damageToEnemy} from './enemies.mjs';
 export {stageReward,damageToEnemy} from './enemies.mjs';
+import {resetSurvival,advanceSurvival} from './survival.mjs';
+export {defenseStats} from './survival.mjs';
 export const TYPES = {
   pistol: {name: '松果手枪', short: '手枪', damage: 5, rate: 2, color: '#df9850', description: '稳定点射 · 可靠的老朋友'},
   smg: {name: '薄荷冲锋枪', short: '冲锋枪', damage: 3, rate: 3.6, color: '#57a593', description: '高速连发 · 弹幕小能手'},
@@ -11,6 +13,8 @@ export const UPGRADE_INFO = {
   attack: {name: '攻击力', base: 12, growth: 1.36, cap: 60},
   speed: {name: '攻击速度', base: 18, growth: 1.42, cap: 30},
   income: {name: '金币收益', base: 15, growth: 1.38, cap: 60},
+  health: {name:'生命强化',base:25,growth:1.38,cap:30},
+  shield: {name:'护盾强化',base:30,growth:1.4,cap:30},
 };
 export const INVENTORY_LIMIT = 120;
 const MAX = 1e150, STEP = 1 / 120;
@@ -20,15 +24,16 @@ const bounded = n => Math.min(MAX, n);
 
 export const treeHealth=baseHealth;
 export function createGame() {
-  return {
+  const s = {
     ...progressionDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
-    upgrades: {attack: 0, speed: 0, income: 0},
+    upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0},
     inventory: [{id: 'w1', type: 'pistol', tier: 0}],
     equipment: ['w1', null, null], nextId: 2,
     kills: 0, totalKills: 0, elapsed: 0, hp: treeHealth(1),
     status: 'playing', cooldowns: [0, 0, 0], accumulator: 0,
   };
+  resetSurvival(s);return s;
 }
 
 export function weaponPower(s, weapon) {
@@ -59,6 +64,8 @@ export function upgrade(s, kind) {
   const cost = upgradeCost(s, kind);
   if (s.coins < cost) return fail('金币还不够，再击败几个敌人吧');
   s.coins -= cost; s.upgrades[kind]++;
+  if(kind==='health')s.survival.hp+=20;
+  if(kind==='shield')s.survival.shield+=15;
   return ok(`${info.name}升至 Lv.${s.upgrades[kind]}`);
 }
 function randomType(random) {
@@ -103,13 +110,14 @@ export function rebirthReward(s) { return Math.floor(s.bestThisRun / 3); }
 export function restartBattle(s) {
   s.kills = 0; s.elapsed = 0; s.hp = treeHealth(s.level);
   s.status = 'playing'; s.cooldowns = [0, 0, 0]; s.accumulator = 0;
+  resetSurvival(s);
 }
 export function rebirth(s) {
   if(s.challenge)return fail('请先结束挑战再转生');
   const reward = rebirthReward(s);
   if (reward <= 0) return fail('通过第 3 关后，即可转生');
   s.crystals = bounded(s.crystals + reward);
-  s.coins = 0; s.upgrades = {attack: 0, speed: 0, income: 0};
+  s.coins = 0; s.upgrades = {attack: 0, speed: 0, income: 0,health:0,shield:0};
   s.level = 1; s.bestThisRun = 0;
   restartBattle(s);
   return {...ok(`转生成功，获得 ${reward} 颗紫晶`), reward};
@@ -148,7 +156,8 @@ export function advance(s, delta) {
     battle.elapsed += STEP;
     if (battle.elapsed + 1e-8 >= limit) {
       battle.status = 'failed'; battle.elapsed = limit; battle.accumulator = 0;
-      events.push(s.challenge?{type:'challenge-result',won:false,reward:0}:{type: 'failed'}); break;
+      if(!s.challenge)s.failureReason='timeout';
+      events.push(s.challenge?{type:'challenge-result',won:false,reward:0}:{type:'failed',reason:'timeout'}); break;
     }
     for (let slot = 0; slot < 3; slot++) {
       const cat = current.cats[slot];
@@ -175,10 +184,12 @@ export function advance(s, delta) {
         s.bestThisRun = s.level; s.bestEver = Math.max(s.bestEver, s.level);
         const reward=stageReward(s.level);
         s.gems = bounded(s.gems + reward.gems);s.fish=bounded(s.fish+reward.fish); s.level++; s.kills = 0; s.elapsed = 0;
+        resetSurvival(s);
         events.push({type:'level',level:s.level,boss:enemy.kind==='boss',reward});
       }
       s.hp = targetHealth(s);
     }
+    if(!s.challenge&&s.status==='playing')events.push(...advanceSurvival(s,STEP));
   }
   return events;
 }

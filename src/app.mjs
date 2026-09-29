@@ -4,6 +4,7 @@ import {ForestScene} from './scene.mjs';
 import {icon, weaponSvg} from './icons.mjs';
 import {startChallenge,exitChallenge,battleState,targetHealth,challengeReward,currentEnemy,stageReward} from './game.mjs';
 import {isBossStage} from './enemies.mjs';
+import {defenseStats,bossCharging,bossDamage,BOSS_CYCLE,SHIELD_DELAY} from './survival.mjs';
 import {MILESTONES,CHALLENGES,petBonus,claimPet,carryPet,feedPet,claimMilestone,availableRewards} from './progression.mjs';
 import {petsPanel,challengesPanel,companionLabel} from './progression-ui.mjs';
 
@@ -45,6 +46,12 @@ $('#app').innerHTML = `
           <div id="no-cats" class="no-cats" hidden>小队还没有武器。打开「武器」，装备后就会自动出战。</div>
           <div id="battle-overlay" class="battle-overlay" hidden><div class="overlay-card">${icon('paw')}<h2 id="overlay-title">猫咪休息中</h2><p id="overlay-copy">伸个懒腰，冒险等你回来。</p><button class="primary-button wide" id="overlay-action" data-action="resume">继续冒险 ${icon('play')}</button></div></div>
         </div>
+        <section class="defense-panel" aria-label="小队生命与护盾">
+          <div class="defense-heading"><b>小队防线</b><span id="shield-status">护盾就绪 · 自动防御</span></div>
+          <div class="defense-meters"><div class="defense-meter health-meter"><div>${icon('health')}<span>生命</span><strong id="team-hp">100 / 100</strong></div><div class="defense-track" id="team-hp-track" role="progressbar" aria-label="小队生命" aria-valuemin="0" aria-valuemax="100"><i id="team-hp-fill"></i></div></div><div class="defense-meter shield-meter"><div>${icon('shield')}<span>护盾</span><strong id="team-shield">60 / 60</strong></div><div class="defense-track" id="team-shield-track" role="progressbar" aria-label="小队护盾" aria-valuemin="0" aria-valuemax="100"><i id="team-shield-fill"></i></div></div></div>
+          <div class="boss-warning" id="boss-warning"><strong id="boss-warning-title">护盾优先吸收伤害</strong><span id="boss-warning-copy">进入新关或重试时恢复满状态</span><div class="charge-track" id="charge-track" hidden><i id="charge-fill"></i></div></div>
+          <div class="defense-feedback" id="defense-feedback" role="status" aria-live="polite" hidden></div>
+        </section>
         <div class="progress-strip"><div class="progress-heading"><b id="progress-label">本关进度 · 0 / 10</b><span id="stage-reward">通关 <b>+10 钻石 · +3 鱼干</b></span></div><div class="stage-path" id="stage-path" aria-hidden="true">${Array.from({length:10},(_,i)=>`<span class="path-stop${i===9?' finish':''}">${i===9?icon('gem'):''}</span>`).join('')}</div></div>
       </div>
       <div id="boss-report" class="boss-report" role="status" hidden></div>
@@ -102,8 +109,8 @@ function sound(kind,gun='pistol') {
     const o=audioContext.createOscillator(),g=audioContext.createGain(),t=audioContext.currentTime;
     o.type=kind==='shot'?(gun==='smg'?'sawtooth':'triangle'):'sine';
     const pitch=gun==='shotgun'?130:gun==='smg'?310:220;
-    o.frequency.setValueAtTime(kind==='shot'?pitch:kind==='kill'?700:520,t);
-    o.frequency.exponentialRampToValueAtTime(kind==='shot'?pitch*.32:kind==='kill'?1100:880,t+.09);
+    o.frequency.setValueAtTime(kind==='hurt'?170:kind==='shot'?pitch:kind==='kill'?700:520,t);
+    o.frequency.exponentialRampToValueAtTime(kind==='hurt'?55:kind==='shot'?pitch*.32:kind==='kill'?1100:880,t+.09);
     g.gain.setValueAtTime(kind==='shot'?(gun==='shotgun'?.032:gun==='smg'?.009:.019):.035,t);g.gain.exponentialRampToValueAtTime(.001,t+.12);
     o.connect(g);g.connect(audioContext.destination);o.start(t);o.stop(t+.14);
   } catch {soundOn=false;syncSound();notify('当前浏览器暂不支持声音',true);}
@@ -141,11 +148,13 @@ function upgradeDetail(kind) {
   const s=stats(state);
   if(kind==='attack')return `伤害 ×${decimal(s.attack)} <em>→ ×${decimal(s.attack*1.22)}</em>`;
   if(kind==='speed')return `射速 ×${s.speed.toFixed(2)} <em>→ ×${(s.speed+.07*petBonus(state).speed).toFixed(2)}</em>`;
+  if(kind==='health'){const n=defenseStats(state).maxHp;return `生命 ${n} <em>→ ${n+20}</em>`;}
+  if(kind==='shield'){const n=defenseStats(state).maxShield;return `护盾 ${n} <em>→ ${n+15}</em>`;}
   return `收益 ×${s.income.toFixed(2)} <em>→ ×${(s.income+.16*petBonus(state).income).toFixed(2)}</em>`;
 }
 function renderPanel() {
   if(selectedTab==='growth') {
-    $('#panel-body').innerHTML=`<div class="section-label"><span>一点升级，一大步冒险</span><b>金币养成</b></div><div class="upgrade-list">${Object.entries(UPGRADE_INFO).map(([key,info])=>`<div class="upgrade-row"><div class="upgrade-symbol">${icon(key)}</div><div><div class="upgrade-title">${info.name}<small>Lv.${state.upgrades[key]}</small></div><div class="upgrade-detail">${state.upgrades[key]>=info.cap?'已经练到炉火纯青':upgradeDetail(key)}</div></div><button class="buy-button" data-action="upgrade" data-kind="${key}" aria-label="升级${info.name}" id="buy-${key}"><span>${icon('coin')}<b>${money(upgradeCost(state,key))}</b></span><small>升级 ${icon('up').replace('class="icon ', 'class="icon inline-icon ')}</small></button></div>`).join('')}</div><div class="tip-card">${icon('leaf')}<p><b>小队长的建议</b><br>先提升攻击力，再给伙伴配上武器。<br>三只猫咪一起出发，火力不止多一点。</p></div>`;
+    $('#panel-body').innerHTML=`<div class="section-label"><span>一点升级，一大步冒险</span><b>金币养成</b></div><div class="upgrade-list">${Object.entries(UPGRADE_INFO).map(([key,info])=>`<div class="upgrade-row"><div class="upgrade-symbol">${icon(key)}</div><div><div class="upgrade-title">${info.name}<small>Lv.${state.upgrades[key]}</small></div><div class="upgrade-detail">${state.upgrades[key]>=info.cap?'已经练到炉火纯青':upgradeDetail(key)}</div></div><button class="buy-button" data-action="upgrade" data-kind="${key}" aria-label="升级${info.name}" id="buy-${key}"><span>${icon('coin')}<b>${money(upgradeCost(state,key))}</b></span><small>升级 ${icon('up').replace('class="icon ', 'class="icon inline-icon ')}</small></button></div>`).join('')}</div><div class="tip-card">${icon('leaf')}<p><b>小队长的建议</b><br>先提升攻击力，再给伙伴配上武器。<br>Boss 会蓄力反击，生命与护盾也要强化。</p></div>`;
   } else if(selectedTab==='weapons') {
     $('#panel-body').innerHTML=`<div class="draw-box">${icon('chest')}<h3>打开一份森林补给</h3><p>随机获得一把 C 级武器 · 三种类型等概率</p><button class="primary-button wide" data-action="draw" id="draw-button">${icon('gem')}10 钻石 · 抽取武器</button></div><div class="section-label"><span>武器背包 <span class="count-pill">${state.inventory.length} / ${INVENTORY_LIMIT}</span></span><b>同款同级 ×2 可合成</b></div><div class="inventory">${[...state.inventory].sort((a,b)=>b.tier-a.tier||Number(state.equipment.includes(b.id))-Number(state.equipment.includes(a.id))).map(weaponCard).join('')}</div><p class="muted-copy">装备一把武器，就会多一只猫咪出战。合成前请先卸下武器；合成后类型随机，等级提升一级。</p>`;
   } else if(selectedTab==='pets'){
@@ -191,6 +200,7 @@ function updateHUD() {
   const rewards=availableRewards(state);$('#pet-notification').textContent=rewards?`${rewards} 可领取`:'';
   $('#tab-pets').classList.toggle('has-rewards',rewards>0);
   const challenge=state.challenge,battle=battleState(state),enemy=currentEnemy(state),reward=stageReward(state.level);
+  updateDefenseHUD(enemy);
   $('.scene-wrap').classList.toggle('boss-battle',enemy.kind==='boss');
   $('.tree-label').classList.toggle('armored-target',enemy.kind==='armored');
   $('#enemy-trait').textContent=enemy.label;
@@ -216,13 +226,27 @@ function updateHUD() {
   const failed=battle.status==='failed'||battle.status==='won';
   $('#battle-overlay').hidden=!failed&&!manualPause;
   if(failed&&challenge){$('#overlay-title').textContent=challenge.status==='won'?'补给挑战成功！':'木偶还站着，再变强一点';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 鱼干，奖励已保存`:'本次未获得奖励，返回主线升级火力后再来';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').innerHTML=`查看结算 ${icon('arrow')}`;}
-  else if(failed){$('#overlay-title').textContent=enemy.kind==='boss'?'古木守卫挡住了去路':'这个对手有点顽强';$('#overlay-copy').textContent='已获得的资源会保留。升级火力、喂养伙伴后，重新挑战本关！';$('#overlay-action').dataset.action='retry';$('#overlay-action').innerHTML=`再试一次 ${icon('refresh')}`;}
+  else if(failed){$('#overlay-title').textContent=state.failureReason==='defeat'?'小队生命耗尽':enemy.kind==='boss'?'古木守卫挡住了去路':'这个对手有点顽强';$('#overlay-copy').textContent=state.failureReason==='defeat'?'已获得的资源会保留。强化生命和护盾，再满状态挑战本关！':'时间用尽。已获得的资源会保留，升级火力后再来一次！';$('#overlay-action').dataset.action='retry';$('#overlay-action').innerHTML=`再试一次 ${icon('refresh')}`;}
   else {$('#overlay-title').textContent='猫咪休息中';$('#overlay-copy').textContent='伸个懒腰，冒险等你回来。';$('#overlay-action').dataset.action='resume';$('#overlay-action').innerHTML=`继续冒险 ${icon('play')}`;}
   $('#live-label').textContent=failed?'等待再次出发':manualPause||dialog.open?'猫咪休息中':'自动战斗中';
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
 function syncSound(){const b=$('#sound-toggle');b.setAttribute('aria-label',soundOn?'关闭声音':'开启声音');b.setAttribute('aria-pressed',String(soundOn));b.innerHTML=icon(soundOn?'sound':'mute');}
+function updateDefenseHUD(enemy){
+  const v=state.survival,d=defenseStats(state),charging=bossCharging(state),active=enemy.kind==='boss'&&state.status==='playing';
+  for(const [key,value,max]of [['hp',v.hp,d.maxHp],['shield',v.shield,d.maxShield]]){
+    $(`#team-${key}`).textContent=`${decimal(value)} / ${max}`;
+    $(`#team-${key}-fill`).style.width=`${value/max*100}%`;$(`#team-${key}-track`).setAttribute('aria-valuenow',Math.round(value/max*100));
+  }
+  $('.defense-panel').classList.toggle('low-health',v.hp/d.maxHp<=.3);
+  $('#shield-status').textContent=state.challenge?'主线防线已暂停':state.status==='failed'?'重试后满状态恢复':manualPause||dialog.open?'防线计时已暂停':v.shield>=d.maxShield?'护盾就绪 · 自动防御':v.damageAgo<SHIELD_DELAY?`${Math.max(0,SHIELD_DELAY-v.damageAgo).toFixed(1)} 秒后回盾`:'护盾恢复中 · 每秒 +8';
+  $('#boss-warning').classList.toggle('charging',charging);
+  $('#charge-track').hidden=!active;$('#charge-fill').style.width=`${v.bossTime/BOSS_CYCLE*100}%`;
+  $('#boss-warning-title').textContent=state.challenge?'训练木偶不会反击':state.status==='failed'?state.failureReason==='defeat'?'防线失守 · 强化后再挑战':'本关时间用尽':charging?'危险！Boss 蓄力中':active?'Boss 正在准备攻击':'护盾优先吸收伤害';
+  $('#boss-warning-copy').textContent=active?`${(BOSS_CYCLE-v.bossTime).toFixed(1)} 秒后重击 · ${bossDamage(state.level)} 点伤害`:state.challenge?'返回主线后继续之前的生命、护盾和蓄力进度':state.status==='failed'?'重试恢复生命和护盾，回到本关第一波':'进入新关或重试时恢复满状态';
+}
+function clearDefenseFeedback(){$('#defense-feedback').hidden=true;}
 function revealWeapon(weapon, merged=false) {
   showDialog(merged?'合成成功':'补给送达',`<div class="draw-reveal">${weaponSvg(weapon.type,weapon.tier)}<span class="tier t${weapon.tier}">${TIERS[weapon.tier]} 级武器</span><h3>${TYPES[weapon.type].name}</h3><p>${TYPES[weapon.type].description}<br>当前秒伤 ${decimal(weaponPower(state,weapon).dps)}</p><div class="dialog-buttons"><button class="secondary-button" data-modal="back">收进背包</button><button class="primary-button" data-modal="equip">立即装备</button></div></div>`,action=>{closeDialog();if(action==='equip')equip(weapon.id);});
 }
@@ -232,10 +256,10 @@ function equip(id) {
   showDialog('选择替换的队员',`<p>三只猫咪都已出战。替换后，原武器会放回背包。</p><div class="equip-choices">${state.equipment.map((equipped,i)=>{const w=state.inventory.find(item=>item.id===equipped);return `<button class="equip-choice" data-modal="slot" data-slot="${i}">${weaponSvg(w.type,w.tier)}<div><b>队员 ${i+1} · ${TYPES[w.type].name}</b><span>${TIERS[w.tier]} 级 · 秒伤 ${decimal(weaponPower(state,w).dps)}</span></div></button>`;}).join('')}</div>`,(_,button)=>{const slot=Number(button.dataset.slot);closeDialog();actionResult(equipWeapon(state,id,slot));});
 }
 function guide() {
-  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为四倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。每次抽取消耗 10 钻石，记得把新武器装备上。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
+  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。Boss 每 5 秒重击一次，攻击前蓄力 2 秒，伤害先扣护盾再扣生命。3 秒未受击后护盾每秒恢复 8；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为四倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。每次抽取消耗 10 钻石，记得把新武器装备上。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`<div class="settings-row"><div><b>声音</b><p>轻柔的射击与奖励音效，默认关闭。</p></div><button class="secondary-button" data-modal="sound">${soundOn?'关闭声音':'开启声音'}</button></div><div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林守卫版 1.2<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`<div class="settings-row"><div><b>声音</b><p>轻柔的射击与奖励音效，默认关闭。</p></div><button class="secondary-button" data-modal="sound">${soundOn?'关闭声音':'开启声音'}</button></div><div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 小队防线版 1.3<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound'){soundOn=!soundOn;syncSound();if(soundOn)sound('upgrade');settings();}
     if(action==='reset')confirmReset();
   });
@@ -243,17 +267,17 @@ function settings() {
 function confirmReset() {
   showDialog('确认重新开始？',`<p>这会清空本浏览器内《喵火前线》的金币、钻石、武器、紫晶、伙伴、鱼干和关卡进度。此操作无法撤销。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">保留进度</button><button class="primary-button danger" data-modal="reset">确认清空并重开</button></div>`,action=>{
     if(action!=='reset'){closeDialog();return;}
-    state=createGame();saveBlocked=false;warning('');scene.resetEffects();manualPause=false;closeDialog();setTab('growth');renderSquad();persist();updateHUD();notify('新的旅程开始啦，30 钻石已放进背包');
+    state=createGame();saveBlocked=false;warning('');scene.resetEffects();clearDefenseFeedback();manualPause=false;closeDialog();setTab('growth');renderSquad();persist();updateHUD();notify('新的旅程开始啦，30 钻石已放进背包');
   });
 }
 
 function beginChallenge(tier){
   const result=startChallenge(state,tier);
-  if(result.ok){manualPause=false;scene.resetEffects();setTab('challenges');}
+  if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}
   actionResult(result);
 }
 function leaveChallenge(){
-  scene.resetEffects();manualPause=false;actionResult(exitChallenge(state));
+  scene.resetEffects();clearDefenseFeedback();manualPause=false;actionResult(exitChallenge(state));
 }
 function challengeResult(){
   const ch=state.challenge;if(!ch||ch.status==='playing')return;
@@ -269,7 +293,7 @@ document.addEventListener('click',event=>{
   if(action==='upgrade')actionResult(upgrade(state,kind));
   if(action==='pause'||action==='resume'){manualPause=action==='resume'?false:!manualPause;updateHUD();persist();}
   if(action==='sound'){soundOn=!soundOn;syncSound();if(soundOn)sound('upgrade');}
-  if(action==='retry'){manualPause=false;scene.resetEffects();actionResult(retry(state));}
+  if(action==='retry'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(retry(state));}
   if(action==='guide')guide();
   if(action==='settings')settings();
   if(action==='close-dialog')closeDialog();
@@ -292,7 +316,7 @@ document.addEventListener('click',event=>{
   }
   if(action==='rebirth') {
     const reward=rebirthReward(state);
-    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级和当前关卡。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='confirm'){manualPause=false;scene.resetEffects();actionResult(rebirth(state));setTab('growth');}});
+    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级和当前关卡。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='confirm'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(rebirth(state));setTab('growth');}});
   }
 });
 
@@ -304,7 +328,13 @@ function frame(now) {
     scene.event(event);
     if(event.type==='shot')sound('shot',event.gun);
     if(event.type==='kill')sound('kill');
+    if(event.type==='boss-strike'){
+      const el=$('#defense-feedback');el.hidden=false;el.classList.toggle('hurt',event.healthDamage>0);
+      el.textContent=`${event.shieldBroken?'护盾破裂！ ':''}护盾吸收 ${decimal(event.shieldDamage)}${event.healthDamage>0?` · 生命 −${decimal(event.healthDamage)}`:' · 小队未受伤'}`;
+      sound('hurt');updateHUD();
+    }
     if(event.type==='level') {
+      clearDefenseFeedback();
       const flash=$('#stage-flash');flash.textContent=event.boss?'古木守卫已击败！':`第 ${event.level-1} 关完成 · +${event.reward.fish} 鱼干`;flash.classList.remove('show');void flash.offsetWidth;flash.classList.add('show');
       if(event.boss){const report=$('#boss-report');report.hidden=false;report.textContent=`第 ${event.level-1} 关 BOSS 已击败 · +${event.reward.gems} 钻石 · +${event.reward.fish} 鱼干`;clearTimeout(bossReportTimer);bossReportTimer=setTimeout(()=>report.hidden=true,12000);}
       persist();if(['pets','challenges'].includes(selectedTab))renderPanel();if(event.level===4)notify('转生与补给挑战已解锁');
@@ -323,4 +353,4 @@ function frame(now) {
 document.addEventListener('visibilitychange',()=>{last=performance.now();if(document.hidden)persist();});
 window.addEventListener('pagehide',persist);
 warning(loaded.warning);renderPanel();renderSquad();updateHUD();persist();requestAnimationFrame(frame);
-if(loaded.restored)notify(loaded.migrated?'旧进度已备份并升级，伙伴营地开放啦！':'欢迎回来！猫咪小队已经准备就绪');
+if(loaded.restored)notify(loaded.migrated?'旧进度已备份并升级，小队防线已就绪！':'欢迎回来！猫咪小队已经准备就绪');

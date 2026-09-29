@@ -2,6 +2,7 @@ import {stats, TYPES, currentEnemy} from './game.mjs';
 import {drawEnemy} from './enemy-art.mjs';
 import {drawCompanion} from './companion-art.mjs';
 import {ImpactTimeline} from './impact-timeline.mjs';
+import {bossCharging} from './survival.mjs';
 
 const CAT_COLORS = [
   {fur:'#edb674', light:'#ffe0a6', stripe:'#d68e52', ears:'#d78d75', scarf:'#65866b'},
@@ -12,7 +13,7 @@ export class ForestScene {
   constructor(canvas) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d');
     this.time = 0; this.particles = []; this.recoil = [0,0,0]; this.shake = 0;
-    this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;this.targetEnemy=null;
+    this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;this.targetEnemy=null;this.teamHit=0;this.shieldImpact=false;
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.width = 1000; this.height = 625;
     this.observer = new ResizeObserver(() => this.resize());
@@ -31,6 +32,7 @@ export class ForestScene {
   event(event) {
     const g = this.height * .785, positions = this.positions();
     this.impacts.add(event);
+    if(event.type==='boss-strike'){this.teamHit=1;this.shieldImpact=event.healthDamage===0;}
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
       this.targetEnemy??=event.targetEnemy;
@@ -39,7 +41,7 @@ export class ForestScene {
     }
     if(this.particles.length>160)this.particles.splice(0,this.particles.length-160);
   }
-  resetEffects(){this.particles=[];this.impacts.clear();this.recoil=[0,0,0];this.shake=0;this.hitFlash=0;this.entry=0;this.targetLevel=null;this.targetEnemy=null;}
+  resetEffects(){this.particles=[];this.impacts.clear();this.recoil=[0,0,0];this.shake=0;this.hitFlash=0;this.entry=0;this.targetLevel=null;this.targetEnemy=null;this.teamHit=0;this.shieldImpact=false;}
   impact(event){
     const g=this.height*.785;
     if(event.type==='shot'){
@@ -64,6 +66,7 @@ export class ForestScene {
     const dt = paused ? 0 : delta, t = this.reduceMotion ? 0 : this.time;
     for(const event of this.impacts.tick(dt))this.impact(event);
     this.hitFlash=Math.max(0,this.hitFlash-dt*9);this.entry=Math.max(0,this.entry-dt*5);
+    this.teamHit=Math.max(0,this.teamHit-dt*2.5);
     this.shake = Math.max(0,this.shake-dt*4);
     this.recoil = this.recoil.map(v=>Math.max(0,v-dt*9));
     c.setTransform(this.canvas.width/w,0,0,this.canvas.height/h,0,0);
@@ -108,6 +111,7 @@ export class ForestScene {
       if(cats[i]) this.cat(p.x,p.y,p.scale,i,cats[i].type,t);
       else this.emptySpot(p.x,p.y,p.scale,i);
     }
+    this.drawDefense(s,g,t);
     for(const p of this.particles) {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();
@@ -138,6 +142,29 @@ export class ForestScene {
     for(let i=0;i<6;i++) {c.save();c.globalAlpha=.5;circle(c,360+i*98+Math.sin(t*.7+i)*15,200+(i*67)%220+Math.cos(t+i)*10,2.2,'#fffce6');c.restore();}
   }
   enemy(x,y,enemy,t){drawEnemy(this.ctx,enemy,x,y,t,this.shake,this.reduceMotion);}
+  drawDefense(s,g,t){
+    if(s.challenge)return;
+    const c=this.ctx,charging=bossCharging(s);
+    for(const [i,p]of this.positions().entries()){
+      if(!s.equipment[i])continue;
+      c.save();
+      if(s.survival.shield>0){
+        c.globalAlpha=.24+(this.shieldImpact?this.teamHit*.35:0);c.strokeStyle='#75bdb9';c.lineWidth=3;
+        c.beginPath();c.ellipse(p.x,p.y-60*p.scale,53*p.scale,86*p.scale,0,0,Math.PI*2);c.stroke();
+      }
+      if(charging){
+        c.globalAlpha=this.reduceMotion?.65:.45+Math.sin(t*9)*.15;c.strokeStyle='#cd875d';c.lineWidth=4;
+        c.beginPath();c.ellipse(p.x,p.y+5,52*p.scale,15,0,0,Math.PI*2);c.stroke();
+        c.font='bold 25px sans-serif';c.textAlign='center';c.fillStyle='#b9744e';c.fillText('!',p.x,p.y-152*p.scale);
+      }
+      c.restore();
+    }
+    if(this.teamHit>0){
+      c.save();c.globalAlpha=this.teamHit*.7;c.strokeStyle=this.shieldImpact?'#80c6c2':'#cc8a62';c.lineWidth=7;
+      const x=this.reduceMotion?290:750-(1-this.teamHit)*640;
+      c.beginPath();c.ellipse(x,g-50,32,95,-.15,Math.PI*.5,Math.PI*1.5);c.stroke();c.restore();
+    }
+  }
   dummy(x,y,t){
     const c=this.ctx,shake=this.reduceMotion?0:Math.sin(t*75)*this.shake*5;
     c.save();c.translate(x+shake,y);ellipse(c,0,2,64,15,'#65784735');
@@ -158,7 +185,7 @@ export class ForestScene {
   cat(x,y,scale,index,gun,t) {
     const c=this.ctx, p=CAT_COLORS[index], recoil=this.recoil[index];
     const bounce=this.reduceMotion?0:Math.sin(t*3+index)*1.7;
-    c.save();c.translate(x,y);c.scale(scale,scale);
+    c.save();c.translate(x-(this.reduceMotion?0:this.teamHit*6),y);c.scale(scale,scale);
     ellipse(c,3,3,42,11,'#6e7d4c35');c.translate(this.reduceMotion?0:-recoil*5,bounce);
     // Tail, boots, round body and tiny adventure backpack.
     c.strokeStyle=p.fur;c.lineWidth=13;c.lineCap='round';c.beginPath();c.moveTo(-25,-29);c.bezierCurveTo(-59,-21,-67,-48,-54,-56);c.stroke();

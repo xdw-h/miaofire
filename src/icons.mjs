@@ -1,4 +1,6 @@
 const paths = {
+  health:'<path d="M12 21S2 15 2 8a5 5 0 0 1 10-2A5 5 0 0 1 22 8c0 7-10 13-10 13Z"/><path d="M5 12h4l2-4 3 8 2-4h3" fill="none" stroke="white" stroke-width="1.5"/>',
+  shield:'<path d="m12 2 9 4v6c0 5-6 9-9 10-3-1-9-5-9-10V6Z"/><path d="m7 12 3 3 7-7" fill="none" stroke="white" stroke-width="2"/>',
   fish: '<path d="M3 12c5-9 13-9 18 0-5 9-13 9-18 0Z"/><path d="m3 12-3-6v12Z"/><circle cx="16" cy="10" r="1.4" fill="#fff8dd"/><path d="M9 7v10" stroke="#fff8dd" stroke-width="1.5" fill="none"/>',
   paw: '<ellipse cx="8" cy="7" rx="2.1" ry="2.8"/><ellipse cx="16" cy="7" rx="2.1" ry="2.8"/><ellipse cx="3.8" cy="12" rx="1.8" ry="2.4"/><ellipse cx="20.2" cy="12" rx="1.8" ry="2.4"/><path d="M6 19c0-3 3-7 6-7s6 4 6 7c0 3-4 1-6 1s-6 2-6-1Z"/>',
   coin: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v8m-2-7h3a2 2 0 0 1 0 4h-2a2 2 0 0 0 0 3h3" fill="none" stroke="#fff8df" stroke-width="1.5"/>',

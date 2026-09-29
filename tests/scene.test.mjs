@@ -110,3 +110,11 @@ test('multiple kills in one frame retain each target stage across a stage bounda
   assert.equal(rendered.at(-1).filter, 'none');
   assert.equal(scene.impacts.targetId, 'tree-51');
 });
+test('boss strike feedback freezes when paused and clears when a battle changes',t=>{
+ const {scene}=makeScene(t),s=createGame();
+ scene.event({type:'boss-strike',shieldDamage:40,healthDamage:0,shieldBroken:false});
+ assert.ok(scene.teamHit>0);const effect=scene.teamHit;
+ scene.draw(s,.1,true);assert.equal(scene.teamHit,effect);
+ scene.draw(s,.1,false);assert.ok(scene.teamHit<effect);
+ scene.resetEffects();assert.equal(scene.teamHit,0);
+});
