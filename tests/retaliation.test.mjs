@@ -16,7 +16,7 @@ test('every new enemy gets its own warning and dead enemies cannot retaliate',()
  const hit=run(s,1/120).find(e=>e.type==='enemy-strike');assert.equal(hit?.enemyKind,'mushroom');
 });
 test('armored enemies retaliate harder and damage scales gently by stage',()=>{
- for(const [level,kills,damage]of [[3,3,8],[6,0,6],[6,3,10]]){
+ for(const [level,kills,damage]of [[3,3,12],[6,0,8],[6,3,14]]){
   const s=createGame();Object.assign(s,{level,kills,equipment:[null,null,null]});s.hp=targetHealth(s);
   assert.equal(run(s,1).find(e=>e.type==='enemy-strike')?.damage,damage);
  }

@@ -22,7 +22,10 @@ test('each species trajectory starts at its source and lands at the defense cont
  }
 });
 test('boss flight stays within its existing two-second windup',()=>{
- const s=createGame();s.level=5;s.kills=9;s.survival.bossTime=2.9;
- assert.equal(attackPresentation(s,'tree-0').phase,'idle');s.survival.bossTime=3.5;assert.equal(attackPresentation(s,'tree-0').phase,'windup');
- s.survival.bossTime=4.8;assert.equal(attackPresentation(s,'tree-0').phase,'flight');
+ const s=createGame();s.level=5;s.kills=9;
+ for(const [strikes,deadline]of [[0,3],[1,5]]){
+  s.survival.enemyStrikes=strikes;s.survival.bossTime=deadline-2.1;
+  assert.equal(attackPresentation(s,'tree-0').phase,'idle');s.survival.bossTime=deadline-1.5;assert.equal(attackPresentation(s,'tree-0').phase,'windup');
+  s.survival.bossTime=deadline-.2;assert.equal(attackPresentation(s,'tree-0').phase,'flight');
+ }
 });

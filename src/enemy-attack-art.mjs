@@ -15,7 +15,7 @@ export function attackPresentation(s,visibleTarget){
  if(s.status!=='playing'||s.challenge||visibleTarget!==`tree-${s.totalKills}`)return null;
  const attack=enemyAttack(s),style=ATTACK_STYLES[attack.enemy.kind],remaining=attack.cycle-s.survival.bossTime;
  const phase=remaining>attack.windup?'idle':remaining>style.flight?'windup':'flight';
- return {kind:attack.enemy.kind,style,phase,progress:clamp(1-remaining/style.flight),
+ return {kind:attack.enemy.kind,enraged:attack.enraged,style,phase,progress:clamp(1-remaining/style.flight),
   windup:phase==='windup'?clamp((attack.windup-remaining)/(attack.windup-style.flight)):phase==='flight'?Math.max(0,1-(1-remaining/style.flight)*4):0};
 }
 export function projectilePoint(from,to,progress,arc){

@@ -7,17 +7,17 @@ const boss=()=>{const s=game.createGame();Object.assign(s,{level:5,kills:9,bestE
 test('team starts with full 100 HP and 60 shield',()=>{
  const s=game.createGame();assert.equal(s.survival?.hp,100);assert.equal(s.survival.shield,60);
 });
-test('boss warns for two seconds then strikes at five seconds, shield first',()=>{
- const s=boss();const first=run(s,3);assert.equal(first.filter(e=>e.type==='boss-charge').length,1);
+test('boss warns for two seconds then first strikes at three seconds, shield first',()=>{
+ const s=boss();const first=run(s,1);assert.equal(first.filter(e=>e.type==='boss-charge').length,1);
  assert.equal(s.survival?.shield,60);assert.equal(run(s,1).filter(e=>e.type==='boss-strike').length,0);
  const hit=run(s,1).find(e=>e.type==='boss-strike');assert.ok(hit);assert.equal(hit.shieldDamage,40);assert.equal(hit.healthDamage,0);
  assert.equal(s.survival.hp,100);assert.equal(s.survival.shield,20);
 });
 test('shield regeneration waits three seconds, damage spills into HP',()=>{
- const s=boss();run(s,5);run(s,3);assert.ok(Math.abs(s.survival.shield-20)<1e-7);
- run(s,1);assert.ok(Math.abs(s.survival.shield-28)<1e-7);
- const hit=run(s,1).find(e=>e.type==='boss-strike');assert.ok(Math.abs(hit.shieldDamage-36)<1e-7);assert.ok(Math.abs(hit.healthDamage-4)<1e-7);
- assert.ok(Math.abs(s.survival.hp-96)<1e-7);
+ const s=boss();run(s,3);run(s,3);assert.ok(Math.abs(s.survival.shield-20)<1e-7);
+ run(s,1);assert.ok(Math.abs(s.survival.shield-24)<1e-7);
+ const hit=run(s,1).find(e=>e.type==='boss-strike');assert.ok(Math.abs(hit.shieldDamage-28)<1e-7);assert.ok(Math.abs(hit.healthDamage-12)<1e-7);
+ assert.ok(Math.abs(s.survival.hp-88)<1e-7);
 });
 test('zero team HP ends battle once without stage rewards',()=>{
  const s=boss(),events=run(s,40);assert.equal(s.status,'failed');assert.equal(s.failureReason,'defeat');
@@ -25,7 +25,7 @@ test('zero team HP ends battle once without stage rewards',()=>{
  assert.equal(events.filter(e=>e.type==='failed').length,1);const before=JSON.stringify(s);run(s,1);assert.equal(JSON.stringify(s),before);
 });
 test('killing shot cancels a boss attack due on the same simulation step',()=>{
- const s=boss();run(s,4);run(s,119/120);s.hp=1;s.equipment=['w1',null,null];s.cooldowns=[0,0,0];
+ const s=boss();run(s,2);run(s,119/120);s.hp=1;s.equipment=['w1',null,null];s.cooldowns=[0,0,0];
  const events=game.advance(s,1/120);assert.equal(s.level,6);assert.equal(events.some(e=>e.type==='boss-strike'),false);
  assert.equal(s.survival.hp,100);assert.equal(s.survival.shield,60);
 });

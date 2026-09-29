@@ -50,7 +50,8 @@ export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false,attackView=null)
   for(const [xx,yy]of [[-73,-238],[59,-266],[13,-294]])ellipse(c,xx,yy,9,11,'#d9af65');
   // Amber eyes and chevron brows communicate a tough but non-frightening opponent.
   ellipse(c,-25,-166,13,16,'#65593f');ellipse(c,25,-166,13,16,'#65593f');
-  ellipse(c,-25,-165,6,10,'#ffe3a1');ellipse(c,25,-165,6,10,'#ffe3a1');
+  const eyeColor=attackView?.enraged?'#f19a63':'#ffe3a1';
+  ellipse(c,-25,-165,6,10,eyeColor);ellipse(c,25,-165,6,10,eyeColor);
   c.strokeStyle='#775c40';c.lineWidth=7;c.beginPath();c.moveTo(-42,-190);c.lineTo(-13,-182);c.moveTo(13,-182);c.lineTo(42,-190);c.moveTo(-19,-133);c.lineTo(19,-133);c.stroke();
   leaf(c,-52,-54,-.6,21,'#87a167');leaf(c,56,-70,.7,19,'#87a167');
   c.fillStyle='#dbb366';c.beginPath();c.moveTo(-29,-331);c.lineTo(-36,-357);c.lineTo(-12,-344);c.lineTo(0,-365);c.lineTo(12,-344);c.lineTo(36,-357);c.lineTo(29,-331);c.closePath();c.fill();

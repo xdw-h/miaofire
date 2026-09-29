@@ -5,9 +5,9 @@ import {saveGame,loadGame,SAVE_KEY} from '../src/storage.mjs';
 const at=(level,kills=0)=>{const s=game.createGame();Object.assign(s,{level,kills,bestEver:level-1,bestThisRun:level-1,totalKills:(level-1)*10+kills});s.hp=game.targetHealth(s);return s;};
 const run=(s,seconds,hz=120)=>{const events=[];for(let i=0;i<seconds*hz;i++)events.push(...game.advance(s,1/hz));return events;};
 
-test('boss is the final encounter every five stages with four times base health',()=>{
- assert.equal(game.targetHealth(at(5,9)),game.treeHealth(5)*4);
- assert.equal(game.targetHealth(at(10,9)),game.treeHealth(10)*4);
+test('boss is the final encounter every five stages with four-and-a-half times base health',()=>{
+ assert.equal(game.targetHealth(at(5,9)),Math.round(game.treeHealth(5)*4.5));
+ assert.equal(game.targetHealth(at(10,9)),Math.round(game.treeHealth(10)*4.5));
  assert.equal(game.targetHealth(at(4,9)),game.treeHealth(4));
  assert.equal(game.targetHealth(at(5,8)),game.treeHealth(5));
 });
@@ -47,7 +47,7 @@ test('shot and kill snapshots retain the exact enemy across a boss transition',(
  const s=at(5,8);s.hp=1;const first=game.advance(s,1/120);
  assert.equal(first.find(e=>e.type==='shot').targetEnemy?.kind,'slime');
  assert.equal(first.find(e=>e.type==='kill').nextEnemy?.kind,'boss');
- assert.equal(s.hp,game.treeHealth(5)*4);
+ assert.equal(s.hp,Math.round(game.treeHealth(5)*4.5));
  s.hp=1;s.cooldowns=[0,0,0];const second=game.advance(s,1/120);
  assert.equal(second.find(e=>e.type==='shot').targetEnemy?.kind,'boss');
  assert.equal(second.find(e=>e.type==='kill').nextEnemy?.kind,'slime');
