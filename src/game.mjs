@@ -1,3 +1,4 @@
+import {progressionDefaults,petBonus,CHALLENGES} from './progression.mjs';
 export const TYPES = {
   pistol: {name: '松果手枪', short: '手枪', damage: 5, rate: 2, color: '#df9850', description: '稳定点射 · 可靠的老朋友'},
   smg: {name: '薄荷冲锋枪', short: '冲锋枪', damage: 3, rate: 3.6, color: '#57a593', description: '高速连发 · 弹幕小能手'},
@@ -18,6 +19,7 @@ const bounded = n => Math.min(MAX, n);
 export function treeHealth(level) { return Math.round(Math.min(1e120, 20 * 1.36 ** (level - 1))); }
 export function createGame() {
   return {
+    ...progressionDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
     upgrades: {attack: 0, speed: 0, income: 0},
     inventory: [{id: 'w1', type: 'pistol', tier: 0}],
@@ -29,8 +31,9 @@ export function createGame() {
 
 export function weaponPower(s, weapon) {
   const type = TYPES[weapon.type];
-  const damage = Math.round(type.damage * 1.85 ** weapon.tier * 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1));
-  const rate = type.rate * (1 + s.upgrades.speed * 0.07);
+  const bonus=petBonus(s);
+  const damage = Math.round(type.damage * 1.85 ** weapon.tier * 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*bonus.attack);
+  const rate = type.rate * (1 + s.upgrades.speed * 0.07)*bonus.speed;
   return {damage, rate, dps: damage * rate};
 }
 export function stats(s) {
@@ -39,14 +42,15 @@ export function stats(s) {
     return weapon ? {...weapon, ...weaponPower(s, weapon)} : null;
   });
   return {cats, dps: cats.reduce((sum, cat) => sum + (cat?.dps || 0), 0),
-    income: 1 + s.upgrades.income * 0.16, attack: 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1),
-    speed: 1 + s.upgrades.speed * 0.07};
+    income: (1 + s.upgrades.income * 0.16)*petBonus(s).income, attack: 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*petBonus(s).attack,
+    speed: (1 + s.upgrades.speed * 0.07)*petBonus(s).speed};
 }
 export function upgradeCost(s, kind) {
   const info = UPGRADE_INFO[kind];
   return info ? Math.ceil(info.base * info.growth ** s.upgrades[kind]) : Infinity;
 }
 export function upgrade(s, kind) {
+  if(s.challenge)return fail('挑战中不能升级，请先返回主线');
   const info = UPGRADE_INFO[kind];
   if (!info) return fail('没有这项升级');
   if (s.upgrades[kind] >= info.cap) return fail('已达到最高等级');
@@ -59,6 +63,7 @@ function randomType(random) {
   return Object.keys(TYPES)[Math.min(2, Math.max(0, Math.floor(random() * 3)))];
 }
 export function drawWeapon(s, random = Math.random) {
+  if(s.challenge)return fail('挑战中不能抽取武器');
   if (s.gems < 10) return fail('需要 10 钻石，通关就能获得');
   if (s.inventory.length >= INVENTORY_LIMIT) return fail('背包已满，请先合成武器');
   const weapon = {id: `w${s.nextId++}`, type: randomType(random), tier: 0};
@@ -66,6 +71,7 @@ export function drawWeapon(s, random = Math.random) {
   return {...ok(`获得 ${TYPES[weapon.type].name} · C 级`), weapon};
 }
 export function equipWeapon(s, id, slot) {
+  if(s.challenge)return fail('挑战中不能更换装备');
   if (!Number.isInteger(slot) || slot < 0 || slot > 2) return fail('出战位置无效');
   if (!s.inventory.some(w => w.id === id)) return fail('武器不存在');
   if (s.equipment.includes(id)) return fail('这把武器已经出战了');
@@ -73,11 +79,13 @@ export function equipWeapon(s, id, slot) {
   return ok(`第 ${slot + 1} 只猫咪准备就绪`);
 }
 export function unequipWeapon(s, slot) {
+  if(s.challenge)return fail('挑战中不能更换装备');
   if (!Number.isInteger(slot) || slot < 0 || slot > 2 || !s.equipment[slot]) return fail('这里没有装备');
   s.equipment[slot] = null; s.cooldowns[slot] = 0;
   return ok('武器已放回背包');
 }
 export function mergeWeapons(s, first, second, random = Math.random) {
+  if(s.challenge)return fail('挑战中不能合成武器');
   if (first === second) return fail('合成需要两把不同的武器');
   const a = s.inventory.find(w => w.id === first), b = s.inventory.find(w => w.id === second);
   if (!a || !b) return fail('合成材料不存在');
@@ -95,6 +103,7 @@ export function restartBattle(s) {
   s.status = 'playing'; s.cooldowns = [0, 0, 0]; s.accumulator = 0;
 }
 export function rebirth(s) {
+  if(s.challenge)return fail('请先结束挑战再转生');
   const reward = rebirthReward(s);
   if (reward <= 0) return fail('通过第 3 关后，即可转生');
   s.crystals = bounded(s.crystals + reward);
@@ -104,39 +113,62 @@ export function rebirth(s) {
   return {...ok(`转生成功，获得 ${reward} 颗紫晶`), reward};
 }
 export function retry(s) {
+  if(s.challenge)return fail('请先结束挑战');
   if (s.status !== 'failed') return fail('正在挑战中');
   restartBattle(s);
   return ok('重新出发！');
 }
 
+export function challengeReward(s,tier){const c=CHALLENGES[tier];return c?(tier<s.challengeClears?c.repeat:c.first):0;}
+export function startChallenge(s,tier){
+  if(s.challenge)return fail('已有挑战进行中');
+  if(s.bestEver<3)return fail('通过第 3 关后开放挑战');
+  if(!Number.isInteger(tier)||!CHALLENGES[tier]||tier>s.challengeClears)return fail('请先通过上一档挑战');
+  if(!s.equipment.some(Boolean))return fail('请先装备至少一把武器');
+  s.challenge={tier,hp:CHALLENGES[tier].hp,elapsed:0,cooldowns:[0,0,0],accumulator:0,status:'playing',reward:0};
+  return ok(`开始${CHALLENGES[tier].name}，限时 30 秒`);
+}
+export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');s.challenge=null;return ok('已返回主线，继续之前的冒险');}
+export function targetId(s){return s.challenge?`challenge-${s.challenge.tier}`:`tree-${s.totalKills}`;}
+export function battleState(s){return s.challenge||s;}
+export function targetHealth(s){return s.challenge?CHALLENGES[s.challenge.tier].hp:treeHealth(s.level);}
+
 // Fixed simulation steps make gameplay identical on 30/60/120 Hz displays.
 export function advance(s, delta) {
   const events = [];
-  if (s.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return events;
-  s.accumulator += Math.min(delta, 0.25);
+  const battle=battleState(s),limit=s.challenge?30:60;
+  if (battle.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return events;
+  battle.accumulator += Math.min(delta, 0.25);
   const current = stats(s);
-  while (s.accumulator + 1e-9 >= STEP && s.status === 'playing') {
-    s.accumulator = Math.max(0, s.accumulator - STEP);
-    s.elapsed += STEP;
-    if (s.elapsed + 1e-8 >= 60) {
-      s.status = 'failed'; s.elapsed = 60; s.accumulator = 0;
-      events.push({type: 'failed'}); break;
+  while (battle.accumulator + 1e-9 >= STEP && battle.status === 'playing') {
+    battle.accumulator = Math.max(0, battle.accumulator - STEP);
+    battle.elapsed += STEP;
+    if (battle.elapsed + 1e-8 >= limit) {
+      battle.status = 'failed'; battle.elapsed = limit; battle.accumulator = 0;
+      events.push(s.challenge?{type:'challenge-result',won:false,reward:0}:{type: 'failed'}); break;
     }
     for (let slot = 0; slot < 3; slot++) {
       const cat = current.cats[slot];
       if (!cat) continue;
-      s.cooldowns[slot] -= STEP;
-      if (s.cooldowns[slot] > 1e-9) continue;
-      s.cooldowns[slot] += 1 / cat.rate;
-      s.hp = Math.max(0, s.hp - cat.damage);
-      events.push({type: 'shot', slot, gun: cat.type, damage: cat.damage});
-      if (s.hp > 0) continue;
+      battle.cooldowns[slot] -= STEP;
+      if (battle.cooldowns[slot] > 1e-9) continue;
+      battle.cooldowns[slot] += 1 / cat.rate;
+      battle.hp = Math.max(0, battle.hp - cat.damage);
+      const id=targetId(s);
+      events.push({type: 'shot', slot, gun: cat.type, damage: cat.damage,targetId:id,targetLevel:s.level});
+      if (battle.hp > 0) continue;
+      if(s.challenge){
+        const reward=challengeReward(s,battle.tier);s.fish=bounded(s.fish+reward);
+        s.challengeClears=Math.max(s.challengeClears,battle.tier+1);battle.reward=reward;battle.status='won';battle.accumulator=0;
+        events.push({type:'kill',coins:0,targetId:id,nextTargetId:null});
+        events.push({type:'challenge-result',won:true,reward});break;
+      }
       const coins = Math.round((4 + Math.floor(s.level * 1.6)) * current.income);
       s.coins = bounded(s.coins + coins); s.kills++; s.totalKills++;
-      events.push({type: 'kill', coins});
+      events.push({type: 'kill', coins,targetId:id,nextTargetId:targetId(s),nextLevel:s.kills>=10?s.level+1:s.level});
       if (s.kills >= 10) {
         s.bestThisRun = s.level; s.bestEver = Math.max(s.bestEver, s.level);
-        s.gems = bounded(s.gems + 10); s.level++; s.kills = 0; s.elapsed = 0;
+        s.gems = bounded(s.gems + 10);s.fish=bounded(s.fish+3); s.level++; s.kills = 0; s.elapsed = 0;
         events.push({type: 'level', level: s.level});
       }
       s.hp = treeHealth(s.level);

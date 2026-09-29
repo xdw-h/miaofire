@@ -1,4 +1,6 @@
 import {stats, TYPES} from './game.mjs';
+import {drawCompanion} from './companion-art.mjs';
+import {ImpactTimeline} from './impact-timeline.mjs';
 
 const CAT_COLORS = [
   {fur:'#edb674', light:'#ffe0a6', stripe:'#d68e52', ears:'#d78d75', scarf:'#65866b'},
@@ -9,6 +11,7 @@ export class ForestScene {
   constructor(canvas) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d');
     this.time = 0; this.particles = []; this.recoil = [0,0,0]; this.shake = 0;
+    this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.width = 1000; this.height = 625;
     this.observer = new ResizeObserver(() => this.resize());
@@ -26,17 +29,30 @@ export class ForestScene {
   }
   event(event) {
     const g = this.height * .785, positions = this.positions();
+    this.impacts.add(event);
     if (event.type === 'shot') {
-      const p = positions[event.slot]; this.recoil[event.slot] = 1; this.shake = .4;
-      this.particles.push({type:'bullet',x:p.x+65*p.scale,y:p.y-73*p.scale,tx:735,ty:g-116-Math.random()*75,life:0,duration:.17,gun:event.gun});
-      if (!this.reduceMotion) this.particles.push({type:'number',x:749+(Math.random()-.5)*68,y:g-210-Math.random()*50,text:`−${compact(event.damage)}`,life:0,duration:.85});
+      this.targetLevel??=event.targetLevel;
+      const p = positions[event.slot]; this.recoil[event.slot] = event.gun==='shotgun'?1.65:event.gun==='smg'?.55:1;
+      this.particles.push({type:'bullet',x:p.x+65*p.scale,y:p.y-73*p.scale,tx:750,ty:g-138,life:0,duration:.15,gun:event.gun,targetId:event.targetId});
+    }
+    if(this.particles.length>160)this.particles.splice(0,this.particles.length-160);
+  }
+  resetEffects(){this.particles=[];this.impacts.clear();this.recoil=[0,0,0];this.shake=0;this.hitFlash=0;this.entry=0;this.targetLevel=null;}
+  impact(event){
+    const g=this.height*.785;
+    if(event.type==='shot'){
+      this.hitFlash=1;this.shake=event.gun==='shotgun'?1.3:event.gun==='smg'?.3:.65;
+      const existing=event.gun==='smg'&&this.particles.find(p=>p.type==='number'&&p.targetId===event.targetId&&p.gun==='smg'&&p.life<.22);
+      if(existing){existing.damage+=event.damage;existing.text=`−${compact(existing.damage)}`;existing.life=0;}
+      else this.particles.push({type:'number',targetId:event.targetId,gun:event.gun,damage:event.damage,x:749+(Math.random()-.5)*60,y:g-195-Math.random()*35,text:`−${compact(event.damage)}`,life:0,duration:.65});
+      if(!this.reduceMotion){this.particles.push({type:'spark',x:750,y:g-138,life:0,duration:.16,size:event.gun==='shotgun'?30:16});}
     }
     if (event.type === 'kill') {
-      this.shake = 1;
-      for (let i=0;i<(this.reduceMotion?3:16);i++) {
+      this.targetLevel=event.nextLevel??null;this.hitFlash=0;this.shake=0;this.entry=1;
+      for (let i=0;i<(this.reduceMotion?2:24);i++) {
         this.particles.push({type:i%3?'wood':'leaf',x:750,y:g-100-Math.random()*130,vx:(Math.random()-.5)*260,vy:-100-Math.random()*160,life:0,duration:.7+Math.random()*.45,size:6+Math.random()*9,rotation:Math.random()*6});
       }
-      this.particles.push({type:'coins',x:765,y:g-260,text:`+${compact(event.coins)}`,life:0,duration:1.1});
+      if(event.coins){this.particles.push({type:'coins',x:765,y:g-260,text:`+${compact(event.coins)}`,life:0,duration:1.1});this.onCoins?.(event.coins);}
     }
     if (this.particles.length > 160) this.particles.splice(0,this.particles.length-160);
   }
@@ -44,6 +60,8 @@ export class ForestScene {
     const c = this.ctx, w = this.width, h = this.height, g = h * .785;
     if (!paused) this.time += delta;
     const dt = paused ? 0 : delta, t = this.reduceMotion ? 0 : this.time;
+    for(const event of this.impacts.tick(dt))this.impact(event);
+    this.hitFlash=Math.max(0,this.hitFlash-dt*9);this.entry=Math.max(0,this.entry-dt*5);
     this.shake = Math.max(0,this.shake-dt*4);
     this.recoil = this.recoil.map(v=>Math.max(0,v-dt*9));
     c.setTransform(this.canvas.width/w,0,0,this.canvas.height/h,0,0);
@@ -75,7 +93,13 @@ export class ForestScene {
     mushroom(c,53,g+49,.8);mushroom(c,927,g+17,.65);
     for(const [x,y] of [[401,g-47],[563,g+85],[882,g+81],[68,g+102]]) flower(c,x,y,t);
     // Target is a friendly woodland tree with carved bark and layered foliage.
-    this.tree(760,g+3,s.level,t);
+    c.save();
+    const entry=this.reduceMotion?0:this.entry;
+    c.translate(760,g+3);c.scale(1-entry*.1,1-entry*.08);c.translate(-760,-g-3);
+    if(this.hitFlash>0)c.filter=`brightness(${1+this.hitFlash*.65})`;
+    if(s.challenge)this.dummy(760,g+3,t);else this.tree(760,g+3,this.targetLevel??=s.level,t);
+    c.restore();
+    drawCompanion(c,s.activePet,388,g+20,t,this.reduceMotion);
     const cats=stats(s).cats, positions=this.positions();
     for(const i of [2,1,0]) {
       const p=positions[i];
@@ -86,12 +110,13 @@ export class ForestScene {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();
       if(p.type==='bullet') {
-        const k=Math.min(1,u*1.2),x=p.x+(p.tx-p.x)*k,y=p.y+(p.ty-p.y)*k;
+        const k=u,x=p.x+(p.tx-p.x)*k,y=p.y+(p.ty-p.y)*k;
         c.strokeStyle=p.gun==='smg'?'#f8ffb7':'#fff5b5';c.lineWidth=p.gun==='shotgun'?6:4;c.lineCap='round';
         c.beginPath();c.moveTo(x-23,y+5);c.lineTo(x,y);c.stroke();
         circle(c,x,y,3,'#fffceb');
-        if(p.gun==='shotgun') {circle(c,x-9,y-9,3,'#ffeca0');circle(c,x-14,y+11,3,'#ffeca0');}
-        if(u>.72) spark(c,p.tx,p.ty,15*(1-u)*3,'#fff4b0');
+        if(p.gun==='shotgun') {for(const spread of [-2,-1,1,2]){const yy=y+spread*12*k;c.beginPath();c.moveTo(x-10,yy);c.lineTo(x,yy);c.stroke();}}
+      } else if(p.type==='spark'){
+        c.globalAlpha=1-u;spark(c,p.x,p.y,p.size*(1-u*.4),'#fff8c1');
       } else if(p.type==='number'||p.type==='coins') {
         c.globalAlpha=1-u*u;c.font=`800 ${p.type==='coins'?23:20}px "Segoe UI","Microsoft YaHei",sans-serif`;
         c.textAlign='center';c.lineWidth=4;c.strokeStyle=p.type==='coins'?'#fff5d2':'#f8f7dccc';
@@ -108,6 +133,17 @@ export class ForestScene {
     // Foreground leaves give the diorama depth without covering controls.
     bush(c,-24,h+8,100,'#77995d','#9bb56f');bush(c,1036,h+18,121,'#82a15f','#a2b975');
     for(let i=0;i<6;i++) {c.save();c.globalAlpha=.5;circle(c,360+i*98+Math.sin(t*.7+i)*15,200+(i*67)%220+Math.cos(t+i)*10,2.2,'#fffce6');c.restore();}
+  }
+  dummy(x,y,t){
+    const c=this.ctx,shake=this.reduceMotion?0:Math.sin(t*75)*this.shake*5;
+    c.save();c.translate(x+shake,y);ellipse(c,0,2,64,15,'#65784735');
+    round(c,-10,-230,20,232,5,'#9d7851');round(c,-80,-154,160,18,6,'#a98858');
+    round(c,-47,-211,94,127,16,'#bc9862');round(c,-40,-205,80,114,13,'#d2b079');
+    circle(c,0,-150,38,'#8b7454');circle(c,0,-150,30,'#ebd39e');circle(c,0,-150,22,'#be875c');circle(c,0,-150,12,'#eee0b6');circle(c,0,-150,5,'#a2704e');
+    round(c,-33,-266,66,49,12,'#c5a471');round(c,-38,-272,76,13,5,'#788966');
+    circle(c,-12,-243,4,'#605a45');circle(c,12,-243,4,'#605a45');
+    c.strokeStyle='#927550';c.lineWidth=3;c.beginPath();c.moveTo(-7,-230);c.lineTo(7,-230);c.stroke();
+    round(c,-51,-9,102,10,4,'#987e52');grass(c,-48,3,17,'#8da064');c.restore();
   }
   tree(x,y,level,t) {
     const c=this.ctx, shake=this.reduceMotion?0:Math.sin(t*75)*this.shake*4;
@@ -141,7 +177,7 @@ export class ForestScene {
     const c=this.ctx, p=CAT_COLORS[index], recoil=this.recoil[index];
     const bounce=this.reduceMotion?0:Math.sin(t*3+index)*1.7;
     c.save();c.translate(x,y);c.scale(scale,scale);
-    ellipse(c,3,3,42,11,'#6e7d4c35');c.translate(-recoil*3,bounce);
+    ellipse(c,3,3,42,11,'#6e7d4c35');c.translate(this.reduceMotion?0:-recoil*5,bounce);
     // Tail, boots, round body and tiny adventure backpack.
     c.strokeStyle=p.fur;c.lineWidth=13;c.lineCap='round';c.beginPath();c.moveTo(-25,-29);c.bezierCurveTo(-59,-21,-67,-48,-54,-56);c.stroke();
     c.strokeStyle=p.stripe;c.lineWidth=5;c.beginPath();c.moveTo(-53,-29);c.lineTo(-59,-36);c.stroke();
@@ -162,7 +198,7 @@ export class ForestScene {
     c.strokeStyle='#977b5b';c.lineWidth=1.5;c.beginPath();c.moveTo(16,-74);c.quadraticCurveTo(13,-69,10,-73);c.moveTo(16,-74);c.quadraticCurveTo(19,-69,23,-73);c.stroke();
     c.fillStyle=p.scarf;c.beginPath();c.moveTo(-22,-59);c.quadraticCurveTo(3,-52,25,-59);c.lineTo(14,-47);c.lineTo(21,-30);c.lineTo(4,-37);c.lineTo(-5,-51);c.lineTo(-22,-53);c.fill();
     // Gun uses the same color and silhouette as its inventory card.
-    c.save();c.translate(19-recoil*3,-54);c.rotate(-.04);
+    c.save();c.translate(19-(this.reduceMotion?0:recoil*5),-54);c.rotate(-.04-(this.reduceMotion?0:recoil*(gun==='shotgun'?.11:.045)));
     const color=TYPES[gun].color;
     round(c,9,5,12,25,3,'#4d5c47');
     if(gun==='shotgun'){round(c,34,-6,46,7,3,'#455746');round(c,34,2,46,6,2,'#6b7d5d');}
@@ -170,7 +206,7 @@ export class ForestScene {
     else round(c,38,-2,19,10,2,'#455746');
     round(c,0,-9,45,23,6,color);round(c,5,-9,37,6,3,'#fff0b978');round(c,13,-14,13,5,2,'#52604a');circle(c,31,3,4,'#f4e3ab');
     ellipse(c,7,14,12,8,p.fur);ellipse(c,40,12,10,8,p.fur);
-    if(recoil>.6&&!this.reduceMotion) spark(c,gun==='shotgun'?86:gun==='smg'?79:66,0,13,'#ffefab');
+    if(recoil>(gun==='smg'?.3:.6)&&!this.reduceMotion) spark(c,gun==='shotgun'?86:gun==='smg'?79:66,0,gun==='shotgun'?23:gun==='smg'?10:15,'#ffefab');
     c.restore();c.restore();
   }
 }
