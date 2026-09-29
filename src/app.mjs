@@ -1,4 +1,5 @@
 import {createGame, advance, upgrade, drawWeapon, orderWeapon, equipWeapon, unequipWeapon, mergeWeapons, rebirth, retry, stats, weaponPower, upgradeCost, treeHealth, rebirthReward, TYPES, TIERS, UPGRADE_INFO, INVENTORY_LIMIT} from './game.mjs';
+import {GameAudio} from './audio.mjs';
 import {weaponTrait} from './weapons.mjs';
 import {arsenalPanel,arsenalCatalog} from './arsenal-ui.mjs';
 import {loadGame, saveGame, SAVE_KEY} from './storage.mjs';
@@ -14,7 +15,7 @@ let storage;
 try { storage = window.localStorage; } catch { storage = {getItem(){throw Error('Unavailable');},setItem(){throw Error('Unavailable');}}; }
 const loaded = loadGame(storage);
 let state = loaded.state, saveBlocked = loaded.blocked, selectedTab = 'growth', manualPause = false, soundOn = false;
-let audioContext, lastSound = 0, dialogHandler = null, saveFailed = false, bossReportTimer;
+let dialogHandler = null, saveFailed = false, bossReportTimer;
 const $ = selector => document.querySelector(selector);
 const money = n => n >= 1e8 ? `${(n/1e8).toFixed(1)}亿` : n >= 1e4 ? `${(n/1e4).toFixed(1)}万` : Math.floor(n).toLocaleString('en-US');
 const decimal = n => n >= 1e4 ? money(n) : n.toFixed(1).replace(/\.0$/, '');
@@ -87,6 +88,7 @@ scene.onCoins=()=>{
   }
 };
 const dialog = $('#dialog');
+const gameAudio = new GameAudio(undefined,()=>syncSound());
 function notify(message, error=false) {
   const el = document.createElement('div'); el.className=`toast${error?' error':''}`; el.textContent=message;
   $('#toasts').append(el);
@@ -100,22 +102,16 @@ function persist() {
   if(!result.ok) {if(!saveFailed)warning(result.warning);saveFailed=true;$('#save-status').textContent='本次进度未保存';}
   else {saveFailed=false;$('#save-status').innerHTML='<i class="save-dot"></i>进度已自动保存';}
 }
-function sound(kind,gun='pistol') {
-  if(!soundOn) return;
-  try {
-    const now=performance.now();
-    if(kind==='shot'&&now-lastSound<(gun==='smg'?65:95))return;
-    if(kind==='shot')lastSound=now;
-    audioContext ||= new (window.AudioContext||window.webkitAudioContext)();
-    if(audioContext.state==='suspended')audioContext.resume();
-    const o=audioContext.createOscillator(),g=audioContext.createGain(),t=audioContext.currentTime;
-    o.type=kind==='shot'?(gun==='smg'?'sawtooth':'triangle'):'sine';
-    const pitch=({shotgun:130,smg:310,sniper:160,crossbow:420,rocket:80,ward:620})[gun]??220;
-    o.frequency.setValueAtTime(kind==='hurt'?170:kind==='shot'?pitch:kind==='kill'?700:520,t);
-    o.frequency.exponentialRampToValueAtTime(kind==='hurt'?55:kind==='shot'?pitch*.32:kind==='kill'?1100:880,t+.09);
-    g.gain.setValueAtTime(kind==='shot'?(gun==='shotgun'?.032:gun==='smg'?.009:.019):.035,t);g.gain.exponentialRampToValueAtTime(.001,t+.12);
-    o.connect(g);g.connect(audioContext.destination);o.start(t);o.stop(t+.14);
-  } catch {soundOn=false;syncSound();notify('当前浏览器暂不支持声音',true);}
+function sound(kind,gun='pistol'){gameAudio.play(kind,gun);}
+function toggleSound(){
+  if(gameAudio.enabled||gameAudio.status==='starting')gameAudio.disable();
+  else void gameAudio.enable();
+}
+function audioStatus(){
+  return gameAudio.status==='starting'?'正在启动声音…':gameAudio.status==='blocked'?'声音未启动，请点击重新开启。':gameAudio.status==='paused'?'切回页面后继续播放':gameAudio.enabled?(gameAudio.volume===0?'音量为 0，请调高音量':'背景音乐与战斗音效已开启'):'声音已关闭';
+}
+function audioSettings(){
+  return `<div class="settings-row"><div><b>背景音乐与音效</b><p id="audio-status" role="status">${audioStatus()}</p></div><button class="secondary-button" data-modal="sound" id="settings-sound-toggle">${soundOn?'关闭声音':'开启声音'}</button></div><div class="audio-settings"><label for="audio-volume">音量 <strong id="audio-volume-value">${Math.round(gameAudio.volume*100)}%</strong></label><input id="audio-volume" type="range" min="0" max="100" step="5" value="${Math.round(gameAudio.volume*100)}" aria-label="游戏音量"><button class="secondary-button wide" data-modal="sound-test">播放试听音</button><p>开启后播放森林旋律和战斗音效。若听不到，请调高手机媒体音量，并检查静音模式或蓝牙耳机输出。刷新后需再次点击开启。</p></div>`;
 }
 function showDialog(title, content, handler=null) {
   if(dialog.open)dialog.close();
@@ -234,7 +230,14 @@ function updateHUD() {
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
-function syncSound(){const b=$('#sound-toggle');b.setAttribute('aria-label',soundOn?'关闭声音':'开启声音');b.setAttribute('aria-pressed',String(soundOn));b.innerHTML=icon(soundOn?'sound':'mute');}
+function syncSound(){
+  soundOn=gameAudio.enabled;
+  const label=gameAudio.status==='starting'?'取消开启':gameAudio.status==='blocked'?'重新开启声音':soundOn?'关闭声音':'开启声音';
+  const b=$('#sound-toggle');b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(soundOn));b.innerHTML=icon(soundOn?'sound':'mute');
+  const status=$('#audio-status');if(status)status.textContent=audioStatus();
+  const toggle=$('#settings-sound-toggle');if(toggle)toggle.textContent=label;
+  const volume=$('#audio-volume-value');if(volume)volume.textContent=`${Math.round(gameAudio.volume*100)}%`;
+}
 function updateDefenseHUD(enemy){
   const v=state.survival,d=defenseStats(state),attack=enemyAttack(state),charging=enemyCharging(state),active=!!attack&&state.status==='playing';
   $('#difficulty-label').textContent=`小队防线 · ${difficultyLabel(state.level)}`;
@@ -262,8 +265,9 @@ function guide() {
   showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`<div class="settings-row"><div><b>声音</b><p>轻柔的射击与奖励音效，默认关闭。</p></div><button class="secondary-button" data-modal="sound">${soundOn?'关闭声音':'开启声音'}</button></div><div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林军械库版 1.6<br>森林很大，慢慢来。</p>`,action=>{
-    if(action==='sound'){soundOn=!soundOn;syncSound();if(soundOn)sound('upgrade');settings();}
+  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林军械库版 1.6.1<br>森林很大，慢慢来。</p>`,action=>{
+    if(action==='sound')toggleSound();
+    if(action==='sound-test'){if(gameAudio.enabled)gameAudio.play('test');else void gameAudio.enable();}
     if(action==='reset')confirmReset();
   });
 }
@@ -289,13 +293,15 @@ function challengeResult(){
   });
 }
 
+document.addEventListener('input',event=>{if(event.target.id==='audio-volume')gameAudio.setVolume(Number(event.target.value)/100);});
+
 document.addEventListener('click',event=>{
   const button=event.target.closest('button[data-action]');if(!button||button.disabled)return;
   const {action,id,kind,tab}=button.dataset;
   if(action==='tab')setTab(tab);
   if(action==='upgrade')actionResult(upgrade(state,kind));
   if(action==='pause'||action==='resume'){manualPause=action==='resume'?false:!manualPause;updateHUD();persist();}
-  if(action==='sound'){soundOn=!soundOn;syncSound();if(soundOn)sound('upgrade');}
+  if(action==='sound')toggleSound();
   if(action==='retry'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(retry(state));}
   if(action==='guide')guide();
   if(action==='settings')settings();
@@ -330,6 +336,7 @@ document.addEventListener('click',event=>{
 let last=performance.now(),hudElapsed=0,saveElapsed=0,lastRewardCount=availableRewards(state);
 function frame(now) {
   const delta=Math.min(.1,Math.max(0,(now-last)/1000));last=now;
+  gameAudio.setPaused(document.hidden);gameAudio.tick();
   const paused=manualPause||dialog.open||document.hidden||battleState(state).status!=='playing';
   if(!paused)for(const event of advance(state,delta)) {
     scene.event(event);
@@ -357,7 +364,7 @@ function frame(now) {
   if(saveElapsed>=5){persist();saveElapsed=0;}
   requestAnimationFrame(frame);
 }
-document.addEventListener('visibilitychange',()=>{last=performance.now();if(document.hidden)persist();});
-window.addEventListener('pagehide',persist);
+document.addEventListener('visibilitychange',()=>{last=performance.now();gameAudio.setPaused(document.hidden);if(document.hidden)persist();});
+window.addEventListener('pagehide',()=>{gameAudio.setPaused(true);persist();});
 warning(loaded.warning);renderPanel();renderSquad();updateHUD();persist();requestAnimationFrame(frame);
 if(loaded.restored)notify(loaded.migrated?'旧进度已备份并升级，小队防线已就绪！':'欢迎回来！猫咪小队已经准备就绪');
