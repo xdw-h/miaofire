@@ -1,13 +1,10 @@
 import {progressionDefaults,petBonus,CHALLENGES} from './progression.mjs';
 import {baseHealth,enemyFor,stageReward,damageToEnemy} from './enemies.mjs';
 export {stageReward,damageToEnemy} from './enemies.mjs';
-import {resetSurvival,resetEnemyAttack,advanceSurvival} from './survival.mjs';
+import {resetSurvival,resetEnemyAttack,advanceSurvival,defenseStats} from './survival.mjs';
+import {TYPES,resolveWeaponShot,wardCharge} from './weapons.mjs';
+export {TYPES} from './weapons.mjs';
 export {defenseStats} from './survival.mjs';
-export const TYPES = {
-  pistol: {name: '松果手枪', short: '手枪', damage: 5, rate: 2, color: '#df9850', description: '稳定点射 · 可靠的老朋友'},
-  smg: {name: '薄荷冲锋枪', short: '冲锋枪', damage: 3, rate: 3.6, color: '#57a593', description: '高速连发 · 弹幕小能手'},
-  shotgun: {name: '落日霰弹枪', short: '霰弹枪', damage: 12, rate: 0.95, color: '#d98575', description: '重型散射 · 一发很有分量'},
-};
 export const TIERS = ['C', 'B', 'A', 'S', 'SS'];
 export const UPGRADE_INFO = {
   attack: {name: '攻击力', base: 12, growth: 1.36, cap: 60},
@@ -69,7 +66,8 @@ export function upgrade(s, kind) {
   return ok(`${info.name}升至 Lv.${s.upgrades[kind]}`);
 }
 function randomType(random) {
-  return Object.keys(TYPES)[Math.min(2, Math.max(0, Math.floor(random() * 3)))];
+  const types=Object.keys(TYPES);
+  return types[Math.min(types.length-1, Math.max(0, Math.floor(random() * types.length)))];
 }
 export function drawWeapon(s, random = Math.random) {
   if(s.challenge)return fail('挑战中不能抽取武器');
@@ -78,6 +76,14 @@ export function drawWeapon(s, random = Math.random) {
   const weapon = {id: `w${s.nextId++}`, type: randomType(random), tier: 0};
   s.gems -= 10; s.inventory.push(weapon);
   return {...ok(`获得 ${TYPES[weapon.type].name} · C 级`), weapon};
+}
+export function orderWeapon(s,type){
+  if(s.challenge)return fail('挑战中不能领取定向补给');
+  if(!Object.hasOwn(TYPES,type))return fail('没有这类武器');
+  if(s.gems<20)return fail('定向补给需要 20 钻石');
+  if(s.inventory.length>=INVENTORY_LIMIT)return fail('背包已满，请先合成武器');
+  const weapon={id:`w${s.nextId++}`,type,tier:0};s.gems-=20;s.inventory.push(weapon);
+  return {...ok(`定向获得 ${TYPES[type].name} · C 级`),weapon};
 }
 export function equipWeapon(s, id, slot) {
   if(s.challenge)return fail('挑战中不能更换装备');
@@ -165,10 +171,15 @@ export function advance(s, delta) {
       battle.cooldowns[slot] -= STEP;
       if (battle.cooldowns[slot] > 1e-9) continue;
       battle.cooldowns[slot] += 1 / cat.rate;
-      const enemy=currentEnemy(s),damage=damageToEnemy(cat.damage,enemy);
+      const enemy=currentEnemy(s),shot=resolveWeaponShot(cat,enemy,battle.hp),{damage}=shot;
+      let shieldRestored=0;
+      if(cat.type==='ward'&&!s.challenge){
+        shieldRestored=Math.min(wardCharge(cat.tier),defenseStats(s).maxShield-s.survival.shield);
+        s.survival.shield+=shieldRestored;
+      }
       battle.hp = Math.max(0, battle.hp - damage);
       const id=targetId(s);
-      events.push({type:'shot',slot,gun:cat.type,damage,armored:enemy.armor>0,targetId:id,targetLevel:s.level,targetEnemy:enemy});
+      events.push({type:'shot',slot,gun:cat.type,...shot,shieldRestored,targetId:id,targetLevel:s.level,targetEnemy:enemy});
       if (battle.hp > 0) continue;
       if(s.challenge){
         const reward=challengeReward(s,battle.tier);s.fish=bounded(s.fish+reward);

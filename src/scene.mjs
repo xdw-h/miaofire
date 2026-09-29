@@ -3,6 +3,7 @@ import {drawEnemy} from './enemy-art.mjs';
 import {drawCompanion} from './companion-art.mjs';
 import {ImpactTimeline} from './impact-timeline.mjs';
 import {attackPresentation,drawAttackFlight,drawAttackImpact} from './enemy-attack-art.mjs';
+import {drawSpecialGun,drawSpecialProjectile,MUZZLE} from './weapon-art.mjs';
 
 const CAT_COLORS = [
   {fur:'#edb674', light:'#ffe0a6', stripe:'#d68e52', ears:'#d78d75', scarf:'#65866b'},
@@ -43,8 +44,11 @@ export class ForestScene {
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
       this.targetEnemy??=event.targetEnemy;
-      const p = positions[event.slot]; this.recoil[event.slot] = event.gun==='shotgun'?1.65:event.gun==='smg'?.55:1;
-      this.particles.push({type:'bullet',x:p.x+65*p.scale,y:p.y-73*p.scale,tx:750,ty:g-138,life:0,duration:.15,gun:event.gun,targetId:event.targetId});
+      const p = positions[event.slot]; this.recoil[event.slot] = ['shotgun','rocket'].includes(event.gun)?1.65:event.gun==='smg'?.55:1;
+      const kick=this.reduceMotion?0:this.recoil[event.slot],angle=-.04-kick*(event.gun==='shotgun'?.11:.045),muzzle=MUZZLE[event.gun];
+      const bounce=this.reduceMotion?0:Math.sin(this.time*3+event.slot)*1.7;
+      this.particles.push({type:'bullet',x:p.x+(19-kick*10+muzzle*Math.cos(angle))*p.scale,y:p.y+(-54+bounce+muzzle*Math.sin(angle))*p.scale,tx:750,ty:g-138,life:0,duration:.15,gun:event.gun,targetId:event.targetId});
+      if(event.shieldRestored>0)this.particles.push({type:'shield-charge',x:p.x,y:p.y-128*p.scale,text:`+${compact(event.shieldRestored)} 护盾`,life:0,duration:.65});
     }
     if(this.particles.length>160)this.particles.splice(0,this.particles.length-160);
   }
@@ -52,11 +56,11 @@ export class ForestScene {
   impact(event){
     const g=this.height*.785;
     if(event.type==='shot'){
-      this.hitFlash=1;this.shake=event.gun==='shotgun'?1.3:event.gun==='smg'?.3:.65;
+      this.hitFlash=1;this.shake=['shotgun','rocket'].includes(event.gun)?1.3:event.gun==='smg'?.3:.65;
       const existing=event.gun==='smg'&&this.particles.find(p=>p.type==='number'&&p.targetId===event.targetId&&p.gun==='smg'&&p.life<.22);
       if(existing){existing.damage+=event.damage;existing.text=`−${compact(existing.damage)}`;existing.life=0;}
-      else this.particles.push({type:'number',targetId:event.targetId,gun:event.gun,damage:event.damage,x:749+(Math.random()-.5)*60,y:g-195-Math.random()*35,text:`−${compact(event.damage)}`,life:0,duration:.65});
-      if(!this.reduceMotion){this.particles.push({type:'spark',x:750,y:g-138,life:0,duration:.16,size:event.gun==='shotgun'?30:16});}
+      else this.particles.push({type:'number',targetId:event.targetId,gun:event.gun,damage:event.damage,x:749+(Math.random()-.5)*60,y:g-195-Math.random()*35,text:`${event.bonus?(event.gun==='sniper'?'猎王 ':'收割 '):''}−${compact(event.damage)}`,life:0,duration:.65});
+      if(!this.reduceMotion){this.particles.push({type:'spark',x:750,y:g-138,life:0,duration:event.gun==='rocket'?.26:.16,size:['shotgun','rocket'].includes(event.gun)?30:16,color:TYPES[event.gun].color});}
     }
     if (event.type === 'kill') {
       this.targetLevel=event.nextLevel??null;this.targetEnemy=event.nextEnemy??null;this.hitFlash=0;this.shake=0;this.entry=1;
@@ -124,13 +128,17 @@ export class ForestScene {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();
       if(p.type==='bullet') {
+        if(drawSpecialProjectile(c,p,u,this.reduceMotion)){c.restore();continue;}
         const k=u,x=p.x+(p.tx-p.x)*k,y=p.y+(p.ty-p.y)*k;
         c.strokeStyle=p.gun==='smg'?'#f8ffb7':'#fff5b5';c.lineWidth=p.gun==='shotgun'?6:4;c.lineCap='round';
         c.beginPath();c.moveTo(x-23,y+5);c.lineTo(x,y);c.stroke();
         circle(c,x,y,3,'#fffceb');
         if(p.gun==='shotgun') {for(const spread of [-2,-1,1,2]){const yy=y+spread*12*k;c.beginPath();c.moveTo(x-10,yy);c.lineTo(x,yy);c.stroke();}}
       } else if(p.type==='spark'){
-        c.globalAlpha=1-u;spark(c,p.x,p.y,p.size*(1-u*.4),'#fff8c1');
+        c.globalAlpha=1-u;spark(c,p.x,p.y,p.size*(1-u*.4),p.color??'#fff8c1');
+      } else if(p.type==='shield-charge') {
+        c.globalAlpha=1-u*u;c.strokeStyle='#9ce3df';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y+50,22+(this.reduceMotion?0:u*18),0,Math.PI*2);c.stroke();
+        c.font='bold 19px "Microsoft YaHei",sans-serif';c.textAlign='center';c.lineWidth=4;c.strokeStyle='#f4ffed';c.strokeText(p.text,p.x,p.y-(this.reduceMotion?0:u*20));c.fillStyle='#347f87';c.fillText(p.text,p.x,p.y-(this.reduceMotion?0:u*20));
       } else if(p.type==='number'||p.type==='coins') {
         c.globalAlpha=1-u*u;c.font=`800 ${p.type==='coins'?23:20}px "Segoe UI","Microsoft YaHei",sans-serif`;
         c.textAlign='center';c.lineWidth=4;c.strokeStyle=p.type==='coins'?'#fff5d2':'#f8f7dccc';
@@ -218,13 +226,15 @@ export class ForestScene {
     // Gun uses the same color and silhouette as its inventory card.
     c.save();c.translate(19-(this.reduceMotion?0:recoil*5),-54);c.rotate(-.04-(this.reduceMotion?0:recoil*(gun==='shotgun'?.11:.045)));
     const color=TYPES[gun].color;
+    if(!drawSpecialGun(c,gun)){
     round(c,9,5,12,25,3,'#4d5c47');
     if(gun==='shotgun'){round(c,34,-6,46,7,3,'#455746');round(c,34,2,46,6,2,'#6b7d5d');}
     else if(gun==='smg'){round(c,39,-2,33,10,3,'#455746');round(c,24,11,10,21,2,'#455746');}
     else round(c,38,-2,19,10,2,'#455746');
     round(c,0,-9,45,23,6,color);round(c,5,-9,37,6,3,'#fff0b978');round(c,13,-14,13,5,2,'#52604a');circle(c,31,3,4,'#f4e3ab');
+    }
     ellipse(c,7,14,12,8,p.fur);ellipse(c,40,12,10,8,p.fur);
-    if(recoil>(gun==='smg'?.3:.6)&&!this.reduceMotion) spark(c,gun==='shotgun'?86:gun==='smg'?79:66,0,gun==='shotgun'?23:gun==='smg'?10:15,'#ffefab');
+    if(recoil>(gun==='smg'?.3:.6)&&!this.reduceMotion) spark(c,MUZZLE[gun]+3,0,['shotgun','rocket'].includes(gun)?23:gun==='smg'?10:15,gun==='ward'?'#d3ffff':'#ffefab');
     c.restore();c.restore();
   }
 }

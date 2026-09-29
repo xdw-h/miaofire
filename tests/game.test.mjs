@@ -88,7 +88,7 @@ test('merging consumes exactly two matching unequipped weapons', () => {
   const s = createGame();
   drawWeapon(s, () => 0); drawWeapon(s, () => 0);
   const [a, b] = s.inventory.slice(1);
-  assert.equal(mergeWeapons(s, a.id, b.id, () => 0.5).ok, true);
+  assert.equal(mergeWeapons(s, a.id, b.id, () => 1/7+.01).ok, true);
   assert.equal(s.inventory.length, 2);
   assert.equal(s.inventory.some(w => w.id === a.id || w.id === b.id), false);
   assert.equal(s.inventory.find(w => w.tier === 1).type, 'smg');

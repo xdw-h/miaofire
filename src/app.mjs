@@ -1,4 +1,6 @@
-import {createGame, advance, upgrade, drawWeapon, equipWeapon, unequipWeapon, mergeWeapons, rebirth, retry, stats, weaponPower, upgradeCost, treeHealth, rebirthReward, TYPES, TIERS, UPGRADE_INFO, INVENTORY_LIMIT} from './game.mjs';
+import {createGame, advance, upgrade, drawWeapon, orderWeapon, equipWeapon, unequipWeapon, mergeWeapons, rebirth, retry, stats, weaponPower, upgradeCost, treeHealth, rebirthReward, TYPES, TIERS, UPGRADE_INFO, INVENTORY_LIMIT} from './game.mjs';
+import {weaponTrait} from './weapons.mjs';
+import {arsenalPanel,arsenalCatalog} from './arsenal-ui.mjs';
 import {loadGame, saveGame, SAVE_KEY} from './storage.mjs';
 import {ForestScene} from './scene.mjs';
 import {icon, weaponSvg} from './icons.mjs';
@@ -58,7 +60,7 @@ $('#app').innerHTML = `
       <div class="squad-row" id="squad" aria-label="出战小队"></div>
       <button class="companion-strip" data-action="tab" data-tab="pets">${icon('paw')}<span id="companion-label">邀请伙伴，让远征更有底气</span><span id="pet-notification"></span>${icon('arrow')}</button>
       <div class="challenge-banner" id="challenge-banner" hidden><span>补给挑战中 · 主线已暂停</span><button class="secondary-button" data-action="challenge-exit">退出挑战</button></div>
-      <div class="combat-info"><span>${icon('target')}小队秒伤 <strong id="dps">10</strong></span><span>${icon('wood')}累计击败 <strong id="total-kills">0</strong></span><span>${icon('trophy')}最高通关 <strong id="best">0</strong></span></div>
+      <div class="combat-info"><span>${icon('target')}基础秒伤 <strong id="dps">10</strong></span><span>${icon('wood')}累计击败 <strong id="total-kills">0</strong></span><span>${icon('trophy')}最高通关 <strong id="best">0</strong></span></div>
     </section>
     <aside class="side-panel" aria-label="小队养成">
       <div class="panel-heading"><h2>猫咪作战室</h2><span id="squad-count">1 / 3 出战</span></div>
@@ -108,7 +110,7 @@ function sound(kind,gun='pistol') {
     if(audioContext.state==='suspended')audioContext.resume();
     const o=audioContext.createOscillator(),g=audioContext.createGain(),t=audioContext.currentTime;
     o.type=kind==='shot'?(gun==='smg'?'sawtooth':'triangle'):'sine';
-    const pitch=gun==='shotgun'?130:gun==='smg'?310:220;
+    const pitch=({shotgun:130,smg:310,sniper:160,crossbow:420,rocket:80,ward:620})[gun]??220;
     o.frequency.setValueAtTime(kind==='hurt'?170:kind==='shot'?pitch:kind==='kill'?700:520,t);
     o.frequency.exponentialRampToValueAtTime(kind==='hurt'?55:kind==='shot'?pitch*.32:kind==='kill'?1100:880,t+.09);
     g.gain.setValueAtTime(kind==='shot'?(gun==='shotgun'?.032:gun==='smg'?.009:.019):.035,t);g.gain.exponentialRampToValueAtTime(.001,t+.12);
@@ -156,7 +158,7 @@ function renderPanel() {
   if(selectedTab==='growth') {
     $('#panel-body').innerHTML=`<div class="section-label"><span>一点升级，一大步冒险</span><b>金币养成</b></div><div class="upgrade-list">${Object.entries(UPGRADE_INFO).map(([key,info])=>`<div class="upgrade-row"><div class="upgrade-symbol">${icon(key)}</div><div><div class="upgrade-title">${info.name}<small>Lv.${state.upgrades[key]}</small></div><div class="upgrade-detail">${state.upgrades[key]>=info.cap?'已经练到炉火纯青':upgradeDetail(key)}</div></div><button class="buy-button" data-action="upgrade" data-kind="${key}" aria-label="升级${info.name}" id="buy-${key}"><span>${icon('coin')}<b>${money(upgradeCost(state,key))}</b></span><small>升级 ${icon('up').replace('class="icon ', 'class="icon inline-icon ')}</small></button></div>`).join('')}</div><div class="tip-card">${icon('leaf')}<p><b>小队长的建议</b><br>先提升攻击力，再给伙伴配上武器。<br>第 3 关起压力提高，Boss 半血狂暴。兼顾生命与护盾。</p></div>`;
   } else if(selectedTab==='weapons') {
-    $('#panel-body').innerHTML=`<div class="draw-box">${icon('chest')}<h3>打开一份森林补给</h3><p>随机获得一把 C 级武器 · 三种类型等概率</p><button class="primary-button wide" data-action="draw" id="draw-button">${icon('gem')}10 钻石 · 抽取武器</button></div><div class="section-label"><span>武器背包 <span class="count-pill">${state.inventory.length} / ${INVENTORY_LIMIT}</span></span><b>同款同级 ×2 可合成</b></div><div class="inventory">${[...state.inventory].sort((a,b)=>b.tier-a.tier||Number(state.equipment.includes(b.id))-Number(state.equipment.includes(a.id))).map(weaponCard).join('')}</div><p class="muted-copy">装备一把武器，就会多一只猫咪出战。合成前请先卸下武器；合成后类型随机，等级提升一级。</p>`;
+    $('#panel-body').innerHTML=`${arsenalPanel()}<div class="section-label"><span>武器背包 <span class="count-pill">${state.inventory.length} / ${INVENTORY_LIMIT}</span></span><b>同款同级 ×2 可合成</b></div><div class="inventory">${[...state.inventory].sort((a,b)=>b.tier-a.tier||Number(state.equipment.includes(b.id))-Number(state.equipment.includes(a.id))).map(weaponCard).join('')}</div><p class="muted-copy">装备一把武器，就会多一只猫咪出战。合成前请先卸下武器；合成后类型随机，等级提升一级。</p>`;
   } else if(selectedTab==='pets'){
     $('#panel-body').innerHTML=petsPanel(state);
   } else if(selectedTab==='challenges'){
@@ -174,7 +176,7 @@ function mergePartner(w) {return state.inventory.find(other=>other.id!==w.id&&ot
 function weaponCard(w) {
   const equipped=state.equipment.includes(w.id), slot=state.equipment.indexOf(w.id), canMerge=!equipped&&w.tier<4&&mergePartner(w);
   const mergeReason=w.tier===4?'已达到最高等级':equipped?'先卸下武器才能合成':'还需要一把同类型同等级的未装备武器';
-  return `<article class="weapon-card${equipped?' equipped':''}" data-weapon="${w.id}"><div class="weapon-card-top"><span class="tier t${w.tier}">${TIERS[w.tier]}</span><span class="equip-tag">${equipped?`队员 ${slot+1} · 出战中`:'待命'}</span></div>${weaponSvg(w.type,w.tier)}<h4>${TYPES[w.type].name}</h4><p>秒伤 ${decimal(weaponPower(state,w).dps)}</p><div class="weapon-actions"><button class="small-button" data-action="${equipped?'unequip':'equip'}" data-id="${w.id}" data-slot="${slot}" aria-label="${equipped?'卸下':'装备'}${TIERS[w.tier]}级${TYPES[w.type].name}">${equipped?'卸下':'装备'}</button><button class="small-button merge" data-action="merge" data-id="${w.id}" ${canMerge?'':'disabled'} title="${canMerge?'消耗两把同款同级武器，随机获得更高一级武器':mergeReason}" aria-label="合成${TIERS[w.tier]}级${TYPES[w.type].name}">合成</button></div></article>`;
+  return `<article class="weapon-card${equipped?' equipped':''}" data-weapon="${w.id}"><div class="weapon-card-top"><span class="tier t${w.tier}">${TIERS[w.tier]}</span><span class="equip-tag">${equipped?`队员 ${slot+1} · 出战中`:'待命'}</span></div>${weaponSvg(w.type,w.tier)}<h4>${TYPES[w.type].name}</h4><span class="weapon-role">${TYPES[w.type].role}</span><p>基础秒伤 ${decimal(weaponPower(state,w).dps)}</p><p class="weapon-trait">${weaponTrait(w)}</p><div class="weapon-actions"><button class="small-button" data-action="${equipped?'unequip':'equip'}" data-id="${w.id}" data-slot="${slot}" aria-label="${equipped?'卸下':'装备'}${TIERS[w.tier]}级${TYPES[w.type].name}">${equipped?'卸下':'装备'}</button><button class="small-button merge" data-action="merge" data-id="${w.id}" ${canMerge?'':'disabled'} title="${canMerge?'消耗两把同款同级武器，随机获得更高一级武器':mergeReason}" aria-label="合成${TIERS[w.tier]}级${TYPES[w.type].name}">合成</button></div></article>`;
 }
 function renderSquad() {
   $('#squad').innerHTML=state.equipment.map((id,i)=>{
@@ -249,7 +251,7 @@ function updateDefenseHUD(enemy){
 }
 function clearDefenseFeedback(){$('#defense-feedback').hidden=true;}
 function revealWeapon(weapon, merged=false) {
-  showDialog(merged?'合成成功':'补给送达',`<div class="draw-reveal">${weaponSvg(weapon.type,weapon.tier)}<span class="tier t${weapon.tier}">${TIERS[weapon.tier]} 级武器</span><h3>${TYPES[weapon.type].name}</h3><p>${TYPES[weapon.type].description}<br>当前秒伤 ${decimal(weaponPower(state,weapon).dps)}</p><div class="dialog-buttons"><button class="secondary-button" data-modal="back">收进背包</button><button class="primary-button" data-modal="equip">立即装备</button></div></div>`,action=>{closeDialog();if(action==='equip')equip(weapon.id);});
+  showDialog(merged?'合成成功':'补给送达',`<div class="draw-reveal">${weaponSvg(weapon.type,weapon.tier)}<span class="tier t${weapon.tier}">${TIERS[weapon.tier]} 级武器</span><h3>${TYPES[weapon.type].name}</h3><p>${weaponTrait(weapon)}<br>基础秒伤 ${decimal(weaponPower(state,weapon).dps)}</p><div class="dialog-buttons"><button class="secondary-button" data-modal="back">收进背包</button><button class="primary-button" data-modal="equip">立即装备</button></div></div>`,action=>{closeDialog();if(action==='equip')equip(weapon.id);});
 }
 function equip(id) {
   const free=state.equipment.indexOf(null);
@@ -257,10 +259,10 @@ function equip(id) {
   showDialog('选择替换的队员',`<p>三只猫咪都已出战。替换后，原武器会放回背包。</p><div class="equip-choices">${state.equipment.map((equipped,i)=>{const w=state.inventory.find(item=>item.id===equipped);return `<button class="equip-choice" data-modal="slot" data-slot="${i}">${weaponSvg(w.type,w.tier)}<div><b>队员 ${i+1} · ${TYPES[w.type].name}</b><span>${TIERS[w.tier]} 级 · 秒伤 ${decimal(weaponPower(state,w).dps)}</span></div></button>`;}).join('')}</div>`,(_,button)=>{const slot=Number(button.dataset.slot);closeDialog();actionResult(equipWeapon(state,id,slot));});
 }
 function guide() {
-  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。每次抽取消耗 10 钻石，记得把新武器装备上。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
+  showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`<div class="settings-row"><div><b>声音</b><p>轻柔的射击与奖励音效，默认关闭。</p></div><button class="secondary-button" data-modal="sound">${soundOn?'关闭声音':'开启声音'}</button></div><div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 险境远征版 1.5<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`<div class="settings-row"><div><b>声音</b><p>轻柔的射击与奖励音效，默认关闭。</p></div><button class="secondary-button" data-modal="sound">${soundOn?'关闭声音':'开启声音'}</button></div><div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林军械库版 1.6<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound'){soundOn=!soundOn;syncSound();if(soundOn)sound('upgrade');settings();}
     if(action==='reset')confirmReset();
   });
@@ -308,6 +310,10 @@ document.addEventListener('click',event=>{
     else showDialog('返回主线？','<p>本次挑战尚未完成，退出不会获得鱼干。主线将从进入挑战前的状态继续。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="stay">继续挑战</button><button class="primary-button" data-modal="leave">退出并返回</button></div>',choice=>{closeDialog();if(choice==='leave')leaveChallenge();});
   }
   if(action==='challenge-result')challengeResult();
+  if(action==='arsenal')showDialog('森林军械图鉴',arsenalCatalog(state),(choice,button)=>{
+    if(choice!=='order')return;const result=orderWeapon(state,button.dataset.type);
+    if(actionResult(result,true)){closeDialog();revealWeapon(result.weapon);}
+  });
   if(action==='draw'){const result=drawWeapon(state);if(actionResult(result,true))revealWeapon(result.weapon);}
   if(action==='equip')equip(id);
   if(action==='unequip')actionResult(unequipWeapon(state,Number(button.dataset.slot)));

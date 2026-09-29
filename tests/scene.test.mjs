@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame, advance, targetHealth} from '../src/game.mjs';
+import {createGame, advance, targetHealth,TYPES} from '../src/game.mjs';
 import {ForestScene} from '../src/scene.mjs';
 
 function makeScene(t) {
@@ -130,4 +130,17 @@ test('scene freezes an in-flight attack and suppresses attacks while displaying 
  scene.attackFlight=(view)=>views.push(structuredClone(view));scene.draw(s,0,false);
  assert.equal(views.at(-1).phase,'flight');const before=views.at(-1);scene.draw(s,.1,true);assert.deepEqual(views.at(-1),before);
  scene.impacts.targetId='tree-previous';const count=views.length;scene.draw(s,0,false);assert.equal(views.length,count);
+});
+
+test('all weapon projectiles and ward pulses freeze and render in both motion modes',t=>{
+ for(const type of Object.keys(TYPES))for(const reduce of [false,true]){
+  const {scene}=makeScene(t),s=createGame();scene.reduceMotion=reduce;s.inventory[0].type=type;s.level=10;s.hp=targetHealth(s);s.survival.shield=0;s.survival.damageAgo=0;
+  for(const event of advance(s,1/120))scene.event(event);
+  const bullet=scene.particles.find(p=>p.type==='bullet');assert.ok(Number.isFinite(bullet.x)&&Number.isFinite(bullet.y));
+  const before=JSON.stringify(scene.particles);scene.draw(s,.1,true);assert.equal(JSON.stringify(scene.particles),before);
+  if(type==='ward')assert.ok(scene.particles.some(p=>p.type==='shield-charge'));
+  for(let i=0;i<12;i++)scene.draw(s,.05,false);
+  assert.equal(scene.particles.some(p=>p.type==='bullet'),false);
+  scene.resetEffects();assert.equal(scene.particles.length,0);
+ }
 });

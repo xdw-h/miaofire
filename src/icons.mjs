@@ -1,3 +1,4 @@
+import {specialWeaponSvg} from './weapon-art.mjs';
 const paths = {
   health:'<path d="M12 21S2 15 2 8a5 5 0 0 1 10-2A5 5 0 0 1 22 8c0 7-10 13-10 13Z"/><path d="M5 12h4l2-4 3 8 2-4h3" fill="none" stroke="white" stroke-width="1.5"/>',
   shield:'<path d="m12 2 9 4v6c0 5-6 9-9 10-3-1-9-5-9-10V6Z"/><path d="m7 12 3 3 7-7" fill="none" stroke="white" stroke-width="2"/>',
@@ -33,6 +34,7 @@ export function icon(name, className = '') {
   return `<svg class="icon ${className}" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">${paths[name] || paths.paw}</svg>`;
 }
 export function weaponSvg(type, tier = 0) {
+  const special=specialWeaponSvg(type,tier);if(special)return special;
   const colors = {pistol: ['#d9954c', '#f5c570'], smg: ['#5b9f8e', '#97d3b1'], shotgun: ['#ca8069', '#efb58c']};
   const [dark, light] = colors[type] || colors.pistol;
   const barrel = type === 'shotgun' ? '<rect x="60" y="24" width="32" height="8" rx="3" fill="#354a43"/><rect x="60" y="33" width="32" height="5" rx="2" fill="#63776c"/>' : type === 'smg' ? '<rect x="65" y="27" width="25" height="9" rx="2" fill="#354a43"/><path d="m48 41-2 20h10l5-20" fill="#354a43"/>' : '<rect x="61" y="28" width="16" height="10" rx="2" fill="#354a43"/>';
