@@ -2,7 +2,7 @@ import {stats, TYPES, currentEnemy,targetId} from './game.mjs';
 import {drawEnemy} from './enemy-art.mjs';
 import {drawCompanion} from './companion-art.mjs';
 import {ImpactTimeline} from './impact-timeline.mjs';
-import {enemyCharging,enemyAttack} from './survival.mjs';
+import {attackPresentation,drawAttackFlight,drawAttackImpact} from './enemy-attack-art.mjs';
 
 const CAT_COLORS = [
   {fur:'#edb674', light:'#ffe0a6', stripe:'#d68e52', ears:'#d78d75', scarf:'#65866b'},
@@ -14,7 +14,7 @@ export class ForestScene {
     this.canvas = canvas; this.ctx = canvas.getContext('2d');
     this.time = 0; this.particles = []; this.recoil = [0,0,0]; this.shake = 0;
     this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;this.targetEnemy=null;this.teamHit=0;this.shieldImpact=false;
-    this.attackFlash=0;this.attackText='';this.attackTarget=null;
+    this.attackFlash=0;this.attackText='';this.attackTarget=null;this.attackKind='slime';this.attackLabel='';this.attackAmount='';this.shieldBroken=false;
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.width = 1000; this.height = 625;
     this.observer = new ResizeObserver(() => this.resize());
@@ -36,6 +36,9 @@ export class ForestScene {
     if(event.type==='boss-strike'||event.type==='enemy-strike'){
       this.teamHit=1;this.shieldImpact=event.healthDamage===0;this.attackFlash=1;this.attackTarget=event.targetId;
       this.attackText=`${event.enemyName??'古木守卫'}反击 · ${event.healthDamage>0?`生命 −${Math.ceil(event.healthDamage)}`:`护盾 −${Math.ceil(event.shieldDamage)}`}`;
+      this.attackKind=event.enemyKind??'boss';this.attackLabel=`${event.enemyName??'古木守卫'}反击`;
+      this.attackAmount=event.healthDamage>0?`−${Math.ceil(event.healthDamage)} 生命`:`−${Math.ceil(event.shieldDamage)} 护盾`;
+      this.shieldBroken=!!event.shieldBroken;this.shieldContact=event.shieldDamage>0;
     }
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
@@ -70,7 +73,7 @@ export class ForestScene {
     const dt = paused ? 0 : delta, t = this.reduceMotion ? 0 : this.time;
     for(const event of this.impacts.tick(dt))this.impact(event);
     this.hitFlash=Math.max(0,this.hitFlash-dt*9);this.entry=Math.max(0,this.entry-dt*5);
-    this.teamHit=Math.max(0,this.teamHit-dt*1.6);this.attackFlash=Math.max(0,this.attackFlash-dt*.7);
+    this.teamHit=Math.max(0,this.teamHit-dt*2.2);this.attackFlash=Math.max(0,this.attackFlash-dt);
     this.shake = Math.max(0,this.shake-dt*4);
     this.recoil = this.recoil.map(v=>Math.max(0,v-dt*9));
     c.setTransform(this.canvas.width/w,0,0,this.canvas.height/h,0,0);
@@ -105,15 +108,9 @@ export class ForestScene {
     c.save();
     const entry=this.reduceMotion?0:this.entry;
     c.translate(760,g+3);c.scale(1-entry*.1,1-entry*.08);c.translate(-760,-g-3);
-    const visualTarget=this.impacts.targetId??targetId(s),attack=enemyAttack(s);
-    const charging=visualTarget===targetId(s)&&enemyCharging(s);
-    const windup=charging?Math.max(0,(s.survival.bossTime-(attack.cycle-attack.windup))/attack.windup):0;
-    const strike=visualTarget===this.attackTarget?this.teamHit:0;
-    if(!s.challenge&&!this.reduceMotion){
-      c.translate(760,g);c.rotate(windup*.06-strike*.12);c.scale(1+windup*.04,1-windup*.04);c.translate(-760-strike*32,g*-1);
-    }
+    const visualTarget=this.impacts.targetId??targetId(s),attackView=attackPresentation(s,visualTarget);
     if(this.hitFlash>0)c.filter=`brightness(${1+this.hitFlash*.65})`;
-    if(s.challenge)this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t);
+    if(s.challenge)this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t,attackView);
     c.restore();
     drawCompanion(c,s.activePet,388,g+20,t,this.reduceMotion);
     const cats=stats(s).cats, positions=this.positions();
@@ -122,7 +119,7 @@ export class ForestScene {
       if(cats[i]) this.cat(p.x,p.y,p.scale,i,cats[i].type,t);
       else this.emptySpot(p.x,p.y,p.scale,i);
     }
-    this.drawDefense(s,g,t);
+    this.drawDefense(s,g,t,attackView);
     for(const p of this.particles) {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();
@@ -152,32 +149,29 @@ export class ForestScene {
     bush(c,-24,h+8,100,'#77995d','#9bb56f');bush(c,1036,h+18,121,'#82a15f','#a2b975');
     for(let i=0;i<6;i++) {c.save();c.globalAlpha=.5;circle(c,360+i*98+Math.sin(t*.7+i)*15,200+(i*67)%220+Math.cos(t+i)*10,2.2,'#fffce6');c.restore();}
   }
-  enemy(x,y,enemy,t){drawEnemy(this.ctx,enemy,x,y,t,this.shake,this.reduceMotion);}
-  drawDefense(s,g,t){
+  enemy(x,y,enemy,t,attackView){drawEnemy(this.ctx,enemy,x,y,t,this.shake,this.reduceMotion,attackView);}
+  attackFlight(view,from,to,g){drawAttackFlight(this.ctx,view,from,to,g,this.reduceMotion);}
+  drawDefense(s,g,t,view){
     if(s.challenge)return;
-    const c=this.ctx,charging=enemyCharging(s);
+    const c=this.ctx,positions=this.positions(),front=positions[Math.max(0,s.equipment.findIndex(Boolean))];
+    const contact={x:front.x+48*front.scale,y:front.y-66*front.scale};
     for(const [i,p]of this.positions().entries()){
       if(!s.equipment[i])continue;
       c.save();
       if(s.survival.shield>0){
-        c.globalAlpha=.24+(this.shieldImpact?this.teamHit*.35:0);c.strokeStyle='#75bdb9';c.lineWidth=3;
+        c.globalAlpha=.18+(this.shieldContact?this.teamHit*.3:0);c.strokeStyle='#75bdb9';c.lineWidth=3;
         c.beginPath();c.ellipse(p.x,p.y-60*p.scale,53*p.scale,86*p.scale,0,0,Math.PI*2);c.stroke();
-      }
-      if(charging){
-        c.globalAlpha=this.reduceMotion?.65:.45+Math.sin(t*9)*.15;c.strokeStyle='#cd875d';c.lineWidth=4;
-        c.beginPath();c.ellipse(p.x,p.y+5,52*p.scale,15,0,0,Math.PI*2);c.stroke();
-        c.font='bold 25px sans-serif';c.textAlign='center';c.fillStyle='#b9744e';c.fillText('!',p.x,p.y-152*p.scale);
       }
       c.restore();
     }
-    if(this.teamHit>0){
-      c.save();c.globalAlpha=Math.min(1,this.teamHit*2);c.strokeStyle='#c57d52';c.lineWidth=9;
-      const x=this.reduceMotion?290:750-(1-this.teamHit)*640;
-      c.beginPath();c.ellipse(x,g-50,32,95,-.15,Math.PI*.5,Math.PI*1.5);c.stroke();c.restore();
-    }
+    if(view)this.attackFlight(view,{x:view.kind==='boss'?720:718,y:g+view.style.sourceY},view.kind==='boss'?{x:contact.x,y:g}:contact,g);
+    const hitPoint=this.attackKind==='boss'?{x:contact.x,y:front.y-18}:contact;
+    drawAttackImpact(c,this.attackKind,hitPoint,this.teamHit,this.shieldContact,this.shieldBroken,this.reduceMotion);
     if(this.attackFlash>0){
-      c.save();c.globalAlpha=Math.min(1,this.attackFlash*3);c.textAlign='center';c.font='bold 25px "Microsoft YaHei",sans-serif';
-      round(c,275,g-270,450,48,16,'#fff2d9');c.fillStyle=this.shieldImpact?'#417f77':'#ae6247';c.fillText(this.attackText,500,g-238);c.restore();
+      const x=front.x+26,y=front.y-176*front.scale-(this.reduceMotion?0:(1-this.attackFlash)*18);
+      c.save();c.globalAlpha=Math.min(1,this.attackFlash*3);c.textAlign='center';c.font='bold 26px "Microsoft YaHei",sans-serif';
+      c.lineWidth=5;c.strokeStyle='#f8f6db';c.strokeText(this.attackAmount,x,y);c.fillStyle=this.shieldImpact?'#417f77':'#ae6247';c.fillText(this.attackAmount,x,y);
+      c.font='500 16px "Microsoft YaHei",sans-serif';c.strokeText(this.attackLabel,x,y+22);c.fillText(this.attackLabel,x,y+22);c.restore();
     }
   }
   dummy(x,y,t){

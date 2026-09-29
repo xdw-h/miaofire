@@ -7,11 +7,15 @@ function face(c,y,wide=1){
  ellipse(c,-33*wide,y+17,11,5,'#d6937970');ellipse(c,33*wide,y+17,11,5,'#d6937970');
  c.strokeStyle='#52734a';c.lineWidth=3;c.lineCap='round';c.beginPath();c.moveTo(-9,y+19);c.quadraticCurveTo(0,y+26,9,y+19);c.stroke();
 }
-export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false){
+export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false,attackView=null){
  c.save();c.translate(x+(reduce?0:Math.sin(time*75)*shake*4),y);
  ellipse(c,0,3,enemy.kind==='boss'?95:69,15,'#6c805b35');
  const bounce=reduce?0:Math.sin(time*(enemy.kind==='boss'?1.8:3.5))*3;
  c.translate(0,bounce);
+ const load=reduce?0:attackView?.windup??0,release=reduce||attackView?.phase!=='flight'?0:Math.sin(Math.PI*Math.min(1,attackView.progress*2));
+ if(enemy.kind==='slime'){c.scale(1+load*.14-release*.07,1-load*.16+release*.08);c.translate(-release*12,0);}
+ if(enemy.kind==='mushroom'){c.rotate(load*.045-release*.06);c.translate(0,load*8-release*7);}
+ if(enemy.kind==='armored'){c.rotate(load*.07-release*.1);c.translate(-release*15,load*5);}
  if(enemy.kind==='slime'){
   ellipse(c,-41,-8,27,12,'#77a47d');ellipse(c,39,-8,27,12,'#77a47d');
   c.fillStyle='#83b99b';c.beginPath();c.moveTo(-78,-34);c.bezierCurveTo(-89,-109,-49,-179,7,-182);c.bezierCurveTo(77,-180,89,-92,78,-34);c.quadraticCurveTo(4,9,-78,-34);c.fill();
@@ -23,7 +27,7 @@ export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false){
   box(c,-47,-131,94,126,35,'#e8d6a6');ellipse(c,0,-60,41,49,'#f5e7be');
   ellipse(c,-53,-68,16,13,'#ead8ad');ellipse(c,54,-68,16,13,'#ead8ad');
   c.fillStyle='#c57e63';c.beginPath();c.moveTo(-96,-129);c.bezierCurveTo(-99,-215,-28,-239,1,-237);c.bezierCurveTo(78,-237,100,-157,96,-129);c.quadraticCurveTo(0,-97,-96,-129);c.fill();
-  ellipse(c,0,-132,98,19,'#a46851');ellipse(c,0,-139,96,15,'#e5b68b');
+  ellipse(c,0,-132,98+load*6,19,'#a46851');ellipse(c,0,-139,96+load*6,15,'#e5b68b');
   ellipse(c,-39,-190,19,12,'#f2dcb1');ellipse(c,27,-214,14,9,'#f2dcb1');ellipse(c,59,-169,15,12,'#f2dcb1');
   face(c,-73,.84);
  }else if(enemy.kind==='armored'){
@@ -37,8 +41,9 @@ export function drawEnemy(c,enemy,x,y,time,shake=0,reduce=false){
   // Root boots, bark fists and a broad canopy make the guardian distinct at phone size.
   box(c,-59,-39,42,41,13,'#92754f');box(c,18,-39,42,41,13,'#92754f');
   c.strokeStyle='#8f714e';c.lineWidth=32;c.lineCap='round';
-  c.beginPath();c.moveTo(-43,-154);c.lineTo(-100,-100);c.lineTo(-116,-143);c.moveTo(43,-154);c.lineTo(100,-108);c.lineTo(112,-153);c.stroke();
-  ellipse(c,-117,-151,28,32,'#ba915d');ellipse(c,112,-161,28,32,'#ba915d');
+  const lift=load*48-release*65;
+  c.beginPath();c.moveTo(-43,-154);c.lineTo(-100,-100-lift*.5);c.lineTo(-116,-143-lift);c.moveTo(43,-154);c.lineTo(100,-108-lift*.5);c.lineTo(112,-153-lift);c.stroke();
+  ellipse(c,-117,-151-lift,28,32,'#ba915d');ellipse(c,112,-161-lift,28,32,'#ba915d');
   box(c,-62,-224,124,204,26,'#98764e');box(c,-48,-219,97,190,23,'#be975e');box(c,-15,-205,27,167,12,'#cfaa71');
   c.strokeStyle='#8b6d48';c.lineWidth=4;c.beginPath();c.moveTo(-35,-113);c.lineTo(-40,-51);c.moveTo(32,-187);c.lineTo(38,-153);c.moveTo(24,-86);c.lineTo(20,-42);c.stroke();
   for(const [xx,yy,rr,color] of [[-72,-220,59,'#72945c'],[66,-227,62,'#72945c'],[-33,-267,64,'#90aa68'],[39,-267,66,'#99b372'],[0,-305,51,'#b4c481']])ellipse(c,xx,yy,rr,rr*.77,color);

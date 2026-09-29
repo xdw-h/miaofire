@@ -125,3 +125,9 @@ test('regular retaliation produces readable attack feedback and freezes while pa
  const before=scene.attackFlash;scene.draw(s,.1,true);assert.equal(scene.attackFlash,before);
  scene.draw(s,.1,false);assert.ok(scene.attackFlash<before);scene.resetEffects();assert.equal(scene.attackFlash,0);
 });
+test('scene freezes an in-flight attack and suppresses attacks while displaying an old enemy',t=>{
+ const {scene}=makeScene(t),s=createGame(),views=[];s.survival.bossTime=.8;
+ scene.attackFlight=(view)=>views.push(structuredClone(view));scene.draw(s,0,false);
+ assert.equal(views.at(-1).phase,'flight');const before=views.at(-1);scene.draw(s,.1,true);assert.deepEqual(views.at(-1),before);
+ scene.impacts.targetId='tree-previous';const count=views.length;scene.draw(s,0,false);assert.equal(views.length,count);
+});
