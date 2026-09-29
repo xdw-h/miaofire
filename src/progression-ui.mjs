@@ -12,7 +12,7 @@ export function petsPanel(s){
  <div class="milestone-heading"><h3>成长足迹</h3><span>一次领取，永久保留</span></div><div class="milestones">${MILESTONES.map(m=>{
  const claimed=s.claimedMilestones.includes(m.id),ready=s[m.field]>=m.target;
  return `<div class="milestone"><div><b>${m.label}</b><span data-milestone-progress="${m.id}">${Math.min(m.target,s[m.field])} / ${m.target} · 奖励 ${m.reward} 鱼干</span></div><button class="small-button" data-action="milestone" data-id="${m.id}" ${claimed||!ready||s.challenge?'disabled':''}>${claimed?'已领取':ready?'领取奖励':'进行中'}</button></div>`;
- }).join('')}</div><p class="muted-copy">主线每通关一关获得 3 鱼干。通过第 3 关后，可在「挑战」中持续获得喂养材料。</p>`;
+ }).join('')}</div><p class="muted-copy">普通关通关获得 3 鱼干，BOSS 关获得 10 鱼干。旧版累计进度继续计入成长足迹。通过第 3 关后，可在「挑战」中持续获得喂养材料。</p>`;
 }
 export function challengesPanel(s){
  const dps=stats(s).dps;

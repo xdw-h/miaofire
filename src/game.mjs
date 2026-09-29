@@ -1,4 +1,6 @@
 import {progressionDefaults,petBonus,CHALLENGES} from './progression.mjs';
+import {baseHealth,enemyFor,stageReward,damageToEnemy} from './enemies.mjs';
+export {stageReward,damageToEnemy} from './enemies.mjs';
 export const TYPES = {
   pistol: {name: '松果手枪', short: '手枪', damage: 5, rate: 2, color: '#df9850', description: '稳定点射 · 可靠的老朋友'},
   smg: {name: '薄荷冲锋枪', short: '冲锋枪', damage: 3, rate: 3.6, color: '#57a593', description: '高速连发 · 弹幕小能手'},
@@ -16,7 +18,7 @@ const fail = message => ({ok: false, message});
 const ok = message => ({ok: true, message});
 const bounded = n => Math.min(MAX, n);
 
-export function treeHealth(level) { return Math.round(Math.min(1e120, 20 * 1.36 ** (level - 1))); }
+export const treeHealth=baseHealth;
 export function createGame() {
   return {
     ...progressionDefaults(),
@@ -55,7 +57,7 @@ export function upgrade(s, kind) {
   if (!info) return fail('没有这项升级');
   if (s.upgrades[kind] >= info.cap) return fail('已达到最高等级');
   const cost = upgradeCost(s, kind);
-  if (s.coins < cost) return fail('金币还不够，再打几棵树吧');
+  if (s.coins < cost) return fail('金币还不够，再击败几个敌人吧');
   s.coins -= cost; s.upgrades[kind]++;
   return ok(`${info.name}升至 Lv.${s.upgrades[kind]}`);
 }
@@ -131,7 +133,8 @@ export function startChallenge(s,tier){
 export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');s.challenge=null;return ok('已返回主线，继续之前的冒险');}
 export function targetId(s){return s.challenge?`challenge-${s.challenge.tier}`:`tree-${s.totalKills}`;}
 export function battleState(s){return s.challenge||s;}
-export function targetHealth(s){return s.challenge?CHALLENGES[s.challenge.tier].hp:treeHealth(s.level);}
+export function currentEnemy(s){return s.challenge?{kind:'dummy',name:'训练木偶',label:'精英目标',level:s.level,armor:0,coinMultiplier:0,hp:CHALLENGES[s.challenge.tier].hp}:enemyFor(s.level,s.kills);}
+export function targetHealth(s){return currentEnemy(s).hp;}
 
 // Fixed simulation steps make gameplay identical on 30/60/120 Hz displays.
 export function advance(s, delta) {
@@ -153,9 +156,10 @@ export function advance(s, delta) {
       battle.cooldowns[slot] -= STEP;
       if (battle.cooldowns[slot] > 1e-9) continue;
       battle.cooldowns[slot] += 1 / cat.rate;
-      battle.hp = Math.max(0, battle.hp - cat.damage);
+      const enemy=currentEnemy(s),damage=damageToEnemy(cat.damage,enemy);
+      battle.hp = Math.max(0, battle.hp - damage);
       const id=targetId(s);
-      events.push({type: 'shot', slot, gun: cat.type, damage: cat.damage,targetId:id,targetLevel:s.level});
+      events.push({type:'shot',slot,gun:cat.type,damage,armored:enemy.armor>0,targetId:id,targetLevel:s.level,targetEnemy:enemy});
       if (battle.hp > 0) continue;
       if(s.challenge){
         const reward=challengeReward(s,battle.tier);s.fish=bounded(s.fish+reward);
@@ -163,15 +167,17 @@ export function advance(s, delta) {
         events.push({type:'kill',coins:0,targetId:id,nextTargetId:null});
         events.push({type:'challenge-result',won:true,reward});break;
       }
-      const coins = Math.round((4 + Math.floor(s.level * 1.6)) * current.income);
+      const coins = Math.round((4 + Math.floor(s.level * 1.6)) * current.income*enemy.coinMultiplier);
       s.coins = bounded(s.coins + coins); s.kills++; s.totalKills++;
-      events.push({type: 'kill', coins,targetId:id,nextTargetId:targetId(s),nextLevel:s.kills>=10?s.level+1:s.level});
+      const nextLevel=s.kills>=10?s.level+1:s.level,nextKills=s.kills>=10?0:s.kills;
+      events.push({type:'kill',coins,targetId:id,nextTargetId:targetId(s),nextLevel,nextEnemy:enemyFor(nextLevel,nextKills),enemyKind:enemy.kind});
       if (s.kills >= 10) {
         s.bestThisRun = s.level; s.bestEver = Math.max(s.bestEver, s.level);
-        s.gems = bounded(s.gems + 10);s.fish=bounded(s.fish+3); s.level++; s.kills = 0; s.elapsed = 0;
-        events.push({type: 'level', level: s.level});
+        const reward=stageReward(s.level);
+        s.gems = bounded(s.gems + reward.gems);s.fish=bounded(s.fish+reward.fish); s.level++; s.kills = 0; s.elapsed = 0;
+        events.push({type:'level',level:s.level,boss:enemy.kind==='boss',reward});
       }
-      s.hp = treeHealth(s.level);
+      s.hp = targetHealth(s);
     }
   }
   return events;

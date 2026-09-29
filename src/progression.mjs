@@ -4,9 +4,9 @@ export const PETS = {
   raccoon: {name:'招财狸',unlock:5,stat:'income',label:'金币',base:.12,step:.04,color:'#a39783',story:'森林里的每一枚金币，都逃不过它的眼睛。'},
 };
 export const MILESTONES = [
-  {id:'kills10',field:'totalKills',target:10,reward:15,label:'击碎 10 棵树'},
-  {id:'kills50',field:'totalKills',target:50,reward:30,label:'击碎 50 棵树'},
-  {id:'kills150',field:'totalKills',target:150,reward:60,label:'击碎 150 棵树'},
+  {id:'kills10',field:'totalKills',target:10,reward:15,label:'累计击败 10 个敌人'},
+  {id:'kills50',field:'totalKills',target:50,reward:30,label:'累计击败 50 个敌人'},
+  {id:'kills150',field:'totalKills',target:150,reward:60,label:'累计击败 150 个敌人'},
   {id:'stage3',field:'bestEver',target:3,reward:20,label:'通过第 3 关'},
   {id:'stage5',field:'bestEver',target:5,reward:40,label:'通过第 5 关'},
   {id:'stage10',field:'bestEver',target:10,reward:80,label:'通过第 10 关'},

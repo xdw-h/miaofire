@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGame, advance} from '../src/game.mjs';
+import {createGame, advance, targetHealth} from '../src/game.mjs';
 import {ForestScene} from '../src/scene.mjs';
 
 function makeScene(t) {
@@ -30,10 +30,10 @@ function makeScene(t) {
     getBoundingClientRect: () => ({width: 1000, height: 625}),
   };
   const scene = new ForestScene(canvas), rendered = [];
-  const drawTree = scene.tree;
-  scene.tree = function (x, y, level, time) {
-    rendered.push({level, filter: ctx.filter, shake: this.shake});
-    return drawTree.call(this, x, y, level, time);
+  const drawEnemy = scene.enemy;
+  scene.enemy = function (x, y, enemy, time) {
+    rendered.push({level:enemy.level,kind:enemy.kind,filter:ctx.filter,shake:this.shake});
+    return drawEnemy.call(this,x,y,enemy,time);
   };
   return {scene, rendered};
 }
@@ -71,12 +71,23 @@ test('resetEffects discards the visual target and pending impacts before a new b
   scene.draw(state, .1, false);
   scene.resetEffects();
   assert.equal(scene.targetLevel, null);
+  assert.equal(scene.targetEnemy,null);
   assert.equal(scene.impacts.targetId, null);
   assert.deepEqual(scene.impacts.queue, []);
   scene.draw(createGame(), .1, false);
   assert.equal(rendered.at(-1).level, 1, 'a fresh battle must not reuse the prior stage tree');
   assert.equal(rendered.at(-1).filter, 'none');
   assert.equal(rendered.at(-1).shake, 0);
+});
+
+test('armor and boss silhouettes change only when the previous hit arrives',t=>{
+ for(const [level,kills,nextKind] of [[3,2,'armored'],[5,8,'boss']]){
+  const {scene,rendered}=makeScene(t),s=createGame();s.level=level;s.kills=kills;s.hp=targetHealth(s);
+  scene.draw(s,0,false);assert.equal(rendered.at(-1).kind,'slime');
+  s.hp=1;for(const event of advance(s,1/120))scene.event(event);
+  scene.draw(s,.1,false);assert.equal(rendered.at(-1).kind,'slime');
+  scene.draw(s,.05,false);assert.equal(rendered.at(-1).kind,nextKind);
+ }
 });
 
 test('multiple kills in one frame retain each target stage across a stage boundary', t => {

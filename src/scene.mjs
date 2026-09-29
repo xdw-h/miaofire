@@ -1,4 +1,5 @@
-import {stats, TYPES} from './game.mjs';
+import {stats, TYPES, currentEnemy} from './game.mjs';
+import {drawEnemy} from './enemy-art.mjs';
 import {drawCompanion} from './companion-art.mjs';
 import {ImpactTimeline} from './impact-timeline.mjs';
 
@@ -11,7 +12,7 @@ export class ForestScene {
   constructor(canvas) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d');
     this.time = 0; this.particles = []; this.recoil = [0,0,0]; this.shake = 0;
-    this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;
+    this.impacts=new ImpactTimeline();this.hitFlash=0;this.entry=0;this.onCoins=null;this.targetLevel=null;this.targetEnemy=null;
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.width = 1000; this.height = 625;
     this.observer = new ResizeObserver(() => this.resize());
@@ -32,12 +33,13 @@ export class ForestScene {
     this.impacts.add(event);
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
+      this.targetEnemy??=event.targetEnemy;
       const p = positions[event.slot]; this.recoil[event.slot] = event.gun==='shotgun'?1.65:event.gun==='smg'?.55:1;
       this.particles.push({type:'bullet',x:p.x+65*p.scale,y:p.y-73*p.scale,tx:750,ty:g-138,life:0,duration:.15,gun:event.gun,targetId:event.targetId});
     }
     if(this.particles.length>160)this.particles.splice(0,this.particles.length-160);
   }
-  resetEffects(){this.particles=[];this.impacts.clear();this.recoil=[0,0,0];this.shake=0;this.hitFlash=0;this.entry=0;this.targetLevel=null;}
+  resetEffects(){this.particles=[];this.impacts.clear();this.recoil=[0,0,0];this.shake=0;this.hitFlash=0;this.entry=0;this.targetLevel=null;this.targetEnemy=null;}
   impact(event){
     const g=this.height*.785;
     if(event.type==='shot'){
@@ -48,9 +50,9 @@ export class ForestScene {
       if(!this.reduceMotion){this.particles.push({type:'spark',x:750,y:g-138,life:0,duration:.16,size:event.gun==='shotgun'?30:16});}
     }
     if (event.type === 'kill') {
-      this.targetLevel=event.nextLevel??null;this.hitFlash=0;this.shake=0;this.entry=1;
+      this.targetLevel=event.nextLevel??null;this.targetEnemy=event.nextEnemy??null;this.hitFlash=0;this.shake=0;this.entry=1;
       for (let i=0;i<(this.reduceMotion?2:24);i++) {
-        this.particles.push({type:i%3?'wood':'leaf',x:750,y:g-100-Math.random()*130,vx:(Math.random()-.5)*260,vy:-100-Math.random()*160,life:0,duration:.7+Math.random()*.45,size:6+Math.random()*9,rotation:Math.random()*6});
+        this.particles.push({type:['slime','mushroom'].includes(event.enemyKind)?'puff':i%3?'wood':'leaf',color:event.enemyKind==='mushroom'?'#ddb89b':'#b9d5a9',x:750,y:g-100-Math.random()*130,vx:(Math.random()-.5)*260,vy:-100-Math.random()*160,life:0,duration:.7+Math.random()*.45,size:6+Math.random()*9,rotation:Math.random()*6});
       }
       if(event.coins){this.particles.push({type:'coins',x:765,y:g-260,text:`+${compact(event.coins)}`,life:0,duration:1.1});this.onCoins?.(event.coins);}
     }
@@ -92,12 +94,12 @@ export class ForestScene {
     pine(c,32,g-87,1.45,'#719a77');pine(c,982,g-79,1.7,'#779e77');
     mushroom(c,53,g+49,.8);mushroom(c,927,g+17,.65);
     for(const [x,y] of [[401,g-47],[563,g+85],[882,g+81],[68,g+102]]) flower(c,x,y,t);
-    // Target is a friendly woodland tree with carved bark and layered foliage.
+    // Keep the visual encounter until its delayed killing projectile arrives.
     c.save();
     const entry=this.reduceMotion?0:this.entry;
     c.translate(760,g+3);c.scale(1-entry*.1,1-entry*.08);c.translate(-760,-g-3);
     if(this.hitFlash>0)c.filter=`brightness(${1+this.hitFlash*.65})`;
-    if(s.challenge)this.dummy(760,g+3,t);else this.tree(760,g+3,this.targetLevel??=s.level,t);
+    if(s.challenge)this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t);
     c.restore();
     drawCompanion(c,s.activePet,388,g+20,t,this.reduceMotion);
     const cats=stats(s).cats, positions=this.positions();
@@ -124,7 +126,8 @@ export class ForestScene {
         if(p.type==='coins') {circle(c,p.x-31,p.y-u*50-8,7,'#e9bd57');circle(c,p.x-31,p.y-u*50-8,4,'#f9db78');}
       } else {
         c.globalAlpha=1-u*u;c.translate(p.x+p.vx*p.life,p.y+p.vy*p.life+220*p.life*p.life);c.rotate(p.rotation+p.life*4);
-        if(p.type==='wood') {round(c,-p.size/2,-p.size/3,p.size,p.size*.6,2,'#b78e58');round(c,-p.size/2,-p.size/3,p.size,2,1,'#e4bd7d');}
+        if(p.type==='puff')ellipse(c,0,0,p.size*(1+u),p.size*.8,p.color);
+        else if(p.type==='wood') {round(c,-p.size/2,-p.size/3,p.size,p.size*.6,2,'#b78e58');round(c,-p.size/2,-p.size/3,p.size,2,1,'#e4bd7d');}
         else {c.fillStyle='#86a859';c.beginPath();c.ellipse(0,0,p.size,p.size/2,0,0,Math.PI*2);c.fill();}
       }
       c.restore();
@@ -134,6 +137,7 @@ export class ForestScene {
     bush(c,-24,h+8,100,'#77995d','#9bb56f');bush(c,1036,h+18,121,'#82a15f','#a2b975');
     for(let i=0;i<6;i++) {c.save();c.globalAlpha=.5;circle(c,360+i*98+Math.sin(t*.7+i)*15,200+(i*67)%220+Math.cos(t+i)*10,2.2,'#fffce6');c.restore();}
   }
+  enemy(x,y,enemy,t){drawEnemy(this.ctx,enemy,x,y,t,this.shake,this.reduceMotion);}
   dummy(x,y,t){
     const c=this.ctx,shake=this.reduceMotion?0:Math.sin(t*75)*this.shake*5;
     c.save();c.translate(x+shake,y);ellipse(c,0,2,64,15,'#65784735');
@@ -144,28 +148,6 @@ export class ForestScene {
     circle(c,-12,-243,4,'#605a45');circle(c,12,-243,4,'#605a45');
     c.strokeStyle='#927550';c.lineWidth=3;c.beginPath();c.moveTo(-7,-230);c.lineTo(7,-230);c.stroke();
     round(c,-51,-9,102,10,4,'#987e52');grass(c,-48,3,17,'#8da064');c.restore();
-  }
-  tree(x,y,level,t) {
-    const c=this.ctx, shake=this.reduceMotion?0:Math.sin(t*75)*this.shake*4;
-    c.save();c.translate(x+shake,y);
-    ellipse(c,0,3,67,15,'#8a9b6140');
-    c.fillStyle='#9d7850';c.beginPath();c.moveTo(-26,-195);c.lineTo(27,-193);c.lineTo(32,-29);c.quadraticCurveTo(47,-7,62,-3);c.quadraticCurveTo(31,8,12,-3);c.quadraticCurveTo(-9,8,-17,-2);c.quadraticCurveTo(-36,8,-52,1);c.lineTo(-30,-28);c.closePath();c.fill();
-    c.fillStyle='#bc945d';c.beginPath();c.moveTo(-18,-190);c.lineTo(9,-190);c.lineTo(16,-14);c.quadraticCurveTo(-2,-7,-18,-13);c.fill();
-    c.strokeStyle='#8f6e4b';c.lineWidth=4;c.lineCap='round';
-    c.beginPath();c.moveTo(9,-116);c.quadraticCurveTo(22,-102,15,-79);c.moveTo(-14,-63);c.lineTo(-15,-33);c.moveTo(-3,-175);c.lineTo(-6,-145);c.stroke();
-    c.save();c.rotate(-.17);ellipse(c,-6,-94,9,15,'#957247');ellipse(c,-6,-94,4,9,'#b78d56');c.restore();
-    c.strokeStyle='#a48050';c.lineWidth=14;c.beginPath();c.moveTo(-12,-123);c.lineTo(-57,-162);c.moveTo(17,-153);c.lineTo(52,-180);c.stroke();
-    const greens=level%9>=6?['#879b5a','#9fac63','#b5bd77','#c1ca83']:['#678c57','#7e9f5e','#91ae6b','#a4bc7a'];
-    ellipse(c,5,-186,107,68,greens[0]);
-    ellipse(c,-61,-205,62,57,greens[1]);ellipse(c,66,-224,62,55,greens[1]);
-    ellipse(c,7,-258,71,64,greens[1]);ellipse(c,-45,-243,58,53,greens[2]);ellipse(c,30,-257,55,52,greens[2]);
-    ellipse(c,-15,-282,50,32,greens[3]);ellipse(c,51,-231,45,37,greens[2]);ellipse(c,-66,-215,38,32,greens[2]);
-    c.save();c.globalAlpha=.58;
-    for(const [a,b,r] of [[-40,-265,12],[19,-275,10],[64,-238,8],[-74,-215,8],[17,-225,11]]) ellipse(c,a,b,r,r*.5,'#bac98a');
-    c.restore();
-    for(const [a,b] of [[-41,-222],[60,-219],[4,-265]]) {circle(c,a,b,7,'#daa466');circle(c,a-2,b-2,3,'#f0c488');}
-    grass(c,-39,4,15,'#89a166');grass(c,33,6,20,'#8caa65');
-    c.restore();
   }
   emptySpot(x,y,scale,index) {
     const c=this.ctx;c.save();c.translate(x,y);c.scale(scale,scale);c.globalAlpha=.56;
