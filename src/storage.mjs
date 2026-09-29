@@ -36,7 +36,7 @@ export function validateState(s,version=3) {
   }
   if(version>=3){
     const v=s.survival,d=defenseStats(s);
-    if(!v||!numeric(v.hp,d.maxHp)||!numeric(v.shield,d.maxShield)||!numeric(v.bossTime,5)||!numeric(v.damageAgo,3)||!integer(v.attackCount,12))return false;
+    if(!v||!numeric(v.hp,d.maxHp)||!numeric(v.shield,d.maxShield)||!numeric(v.bossTime,5)||!numeric(v.damageAgo,3)||!integer(v.attackCount,60)||!integer(v.enemyStrikes??0,60))return false;
     if(![null,'timeout','defeat'].includes(s.failureReason))return false;
   }
   return true;

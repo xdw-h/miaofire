@@ -118,3 +118,10 @@ test('boss strike feedback freezes when paused and clears when a battle changes'
  scene.draw(s,.1,false);assert.ok(scene.teamHit<effect);
  scene.resetEffects();assert.equal(scene.teamHit,0);
 });
+test('regular retaliation produces readable attack feedback and freezes while paused',t=>{
+ const {scene}=makeScene(t),s=createGame();
+ scene.event({type:'enemy-strike',enemyKind:'slime',enemyName:'苔团',targetId:'tree-0',shieldDamage:4,healthDamage:0});
+ assert.ok(scene.teamHit>0);assert.match(scene.attackText,/苔团反击/);assert.ok(scene.attackFlash>0);
+ const before=scene.attackFlash;scene.draw(s,.1,true);assert.equal(scene.attackFlash,before);
+ scene.draw(s,.1,false);assert.ok(scene.attackFlash<before);scene.resetEffects();assert.equal(scene.attackFlash,0);
+});

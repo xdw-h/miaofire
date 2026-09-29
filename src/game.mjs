@@ -1,7 +1,7 @@
 import {progressionDefaults,petBonus,CHALLENGES} from './progression.mjs';
 import {baseHealth,enemyFor,stageReward,damageToEnemy} from './enemies.mjs';
 export {stageReward,damageToEnemy} from './enemies.mjs';
-import {resetSurvival,advanceSurvival} from './survival.mjs';
+import {resetSurvival,resetEnemyAttack,advanceSurvival} from './survival.mjs';
 export {defenseStats} from './survival.mjs';
 export const TYPES = {
   pistol: {name: '松果手枪', short: '手枪', damage: 5, rate: 2, color: '#df9850', description: '稳定点射 · 可靠的老朋友'},
@@ -187,7 +187,7 @@ export function advance(s, delta) {
         resetSurvival(s);
         events.push({type:'level',level:s.level,boss:enemy.kind==='boss',reward});
       }
-      s.hp = targetHealth(s);
+      s.hp = targetHealth(s);resetEnemyAttack(s);
     }
     if(!s.challenge&&s.status==='playing')events.push(...advanceSurvival(s,STEP));
   }
