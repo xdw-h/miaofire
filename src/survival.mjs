@@ -1,5 +1,6 @@
 import {encounterFor} from './enemies.mjs';
 import {blessingCount} from './blessings.mjs';
+import {tickBountyPoison} from './bounties.mjs';
 export const BOSS_CYCLE=5, BOSS_WINDUP=2, SHIELD_DELAY=3, SHIELD_REGEN=8;
 export function shieldRecovery(s){return s.dailyRule==='drought'?0:s.level<3?SHIELD_REGEN:4;}
 export function defenseStats(s){if(s.challenge?.run)return defenseStats(s.challenge.run);return {maxHp:100+20*s.upgrades.health,maxShield:60+15*s.upgrades.shield+15*blessingCount({...s,challenge:null},'barrier')};}
@@ -11,6 +12,7 @@ export function enemyAttack(s){
  if(s.challenge?.run)return enemyAttack(s.challenge.run);
  if(s.challenge)return null;
  const enemy=encounterFor(s),boss=enemy.kind==='boss',enraged=boss&&s.hp<=enemy.hp*.5;
+ if(s.bountyRun){const heavy=s.bountyRun.id==='berserker';return {enemy,boss:true,enraged,cycle:s.survival.enemyStrikes?6:4,windup:heavy?3:2,damage:heavy?60*(enraged?2:1):s.bountyRun.id==='toxic'?24:38};}
  const regularDamage=s.level<3?4:6+Math.floor((s.level-3)*.9);
  const repeat=(s.level<3?4:s.level<8?3.5:3)*(enemy.elite==='fury'?.8:1);
  return {enemy,boss,enraged,cycle:boss?(s.survival.enemyStrikes?BOSS_CYCLE:3):s.survival.enemyStrikes?repeat:1,windup:boss?BOSS_WINDUP:1,
@@ -23,6 +25,7 @@ export function bossCharging(s){return enemyAttack(s)?.boss===true&&enemyChargin
 export function advanceSurvival(s,dt){
  if(s.challenge||s.status!=='playing'||s.endlessRun?.pending)return [];
  const v=s.survival,events=[],d=defenseStats(s);
+ events.push(...tickBountyPoison(s,dt));if(s.status!=='playing')return events;
  const recovery=Math.max(0,dt-Math.max(0,SHIELD_DELAY-v.damageAgo));
  v.damageAgo=Math.min(SHIELD_DELAY,v.damageAgo+dt);
  v.shield=Math.min(d.maxShield,v.shield+shieldRecovery(s)*recovery);
@@ -31,6 +34,7 @@ export function advanceSurvival(s,dt){
  if((before<cycle-windup-1e-8||before===0&&cycle===windup)&&v.bossTime>=cycle-windup-1e-8)events.push({type:boss?'boss-charge':'enemy-charge',damage});
  if(v.bossTime<cycle-1e-8)return events;
  v.bossTime=0;v.attackCount++;v.enemyStrikes=(v.enemyStrikes??0)+1;v.damageAgo=0;
+ if(s.bountyRun?.id==='toxic'){s.bountyRun.poisonLeft=4;s.bountyRun.poisonClock=0;}
  const shieldDamage=Math.min(v.shield,damage),healthDamage=Math.min(v.hp,damage-shieldDamage);
  const shieldBroken=v.shield>0&&damage>=v.shield;
  v.shield=Math.max(0,v.shield-shieldDamage);v.hp=Math.max(0,v.hp-healthDamage);

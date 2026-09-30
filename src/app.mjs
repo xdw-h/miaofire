@@ -22,6 +22,9 @@ import {createHonorBoard} from './honor-ui.mjs';
 import {scoreFromGame} from './leaderboard-rules.mjs';
 import {startEndless,chooseEndless} from './game.mjs';
 import {endlessPanel,endlessChoices} from './endless-ui.mjs';
+import {startBounty} from './game.mjs';
+import {BOUNTIES,bountyReward} from './bounties.mjs';
+import {bountiesPanel} from './bounties-ui.mjs';
 const actor=()=>state.challenge?.run||state;
 const endlessPending=()=>!!actor().endlessRun?.pending;
 
@@ -196,7 +199,7 @@ function renderPanel() {
   } else if(selectedTab==='pets'){
     $('#panel-body').innerHTML=petsPanel(state);
   } else if(selectedTab==='challenges'){
-    $('#panel-body').innerHTML=endlessPanel(state)+dailyPanel(state)+challengesPanel(state);
+    $('#panel-body').innerHTML=bountiesPanel(state)+endlessPanel(state)+dailyPanel(state)+challengesPanel(state);
   } else {
     $('#panel-body').innerHTML=`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>新的起点，更强的你</h3><p>把这趟旅途化成紫晶，<br>带着永久的力量再次出发。</p><div class="rebirth-stats"><div><strong id="rebirth-reward">+${rebirthReward(state)}</strong><span>本次可得紫晶</span></div><div><strong>+${decimal(state.crystals*10)}%</strong><span>现有永久攻击加成</span></div></div><button class="primary-button wide" data-action="rebirth" id="rebirth-button">${icon('refresh')}开始转生</button><div class="rebirth-note"><b>保留</b> 武器、装备、钻石、紫晶、伙伴和鱼干<br><b>重置</b> 金币、金币升级、当前关卡和远征祝福<br>每通过 3 关获得 1 颗紫晶，每颗永久增加 10% 基础攻击力。</div></div>`;
   }
@@ -246,7 +249,7 @@ function updateHUD() {
   $('#challenge-banner').hidden=!challenge;
   $('#challenge-banner>span').textContent=endless?'无尽守卫中 · 主线已暂停':daily?'每日挑战中 · 主线已暂停':'补给挑战中 · 主线已暂停';
   const chapter=state.level<=3?'初入松林':state.level<=6?'林间深处':state.level<=10?'风语山谷':'无尽林海';
-  $('#stage-title').textContent=endless?`无尽守卫 · 第 ${a.endlessRun.waves+1} 波`:daily?`每日 · ${DAILY_RULES[challenge.rule].name}`:challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
+  $('#stage-title').textContent=challenge?.kind==='bounty'?`悬赏 · ${BOUNTIES[challenge.id].name}`:endless?`无尽守卫 · 第 ${a.endlessRun.waves+1} 波`:daily?`每日 · ${DAILY_RULES[challenge.rule].name}`:challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
   $('#stage-sub').textContent=endless?(endlessPending()?'Boss 已击败 · 选择补给后继续':'每 5 波一个 Boss · 血盾不会随换波补满'):daily?`${challenge.date} · 固定试用小队 · 技能可用`:challenge?'集中火力！30 秒内击破训练木偶':enemy.kind==='boss'?'古木守卫现身 · 集中火力拿下丰厚补给':isBossStage(state.level)?'本关第 10 波：古木守卫 BOSS':enemy.kind==='armored'?'松果硬壳抵消 25% 伤害 · 升级火力击破它':`距离 BOSS 关还有 ${5-state.level%5} 关`;
   const seconds=Math.max(0,Math.ceil((challenge&&!challenge.run?30:60)-battle.elapsed));$('#timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
   $('#timer-wrap').classList.toggle('urgent',seconds<=10);
@@ -273,6 +276,16 @@ function updateHUD() {
   if(endlessPending()){$('#overlay-title').textContent='Boss 已击败，补给抵达';$('#overlay-copy').textContent=`已守住 ${a.endlessRun.waves} 波，选择强化或维修后继续。`;$('#overlay-action').dataset.action='endless-choice';$('#overlay-action').textContent='选择补给';}
   if(endless&&failed){$('#overlay-title').textContent='守卫结束';$('#overlay-copy').textContent=`本局完成 ${a.endlessRun.waves} 波 · 最佳 ${state.endless.bestWaves} 波`;$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').textContent='结算 · 留名上榜';}
   $('#live-label').textContent=failed?'等待再次出发':endlessPending()?'等待选择补给':state.expedition.pending?'等待选择祝福':manualPause||dialog.open||honor.isOpen()?'猫咪休息中':'自动战斗中';
+  if(challenge?.kind==='bounty'){
+    $('#companion-label').textContent=companionLabel(a);$('#difficulty-label').textContent='悬赏小队防线';
+    $('#challenge-banner>span').textContent='Boss 悬赏中 · 主线已暂停';
+    $('#stage-sub').textContent='60 秒 · 携带主线养成 · 胜利获得改造材料';
+    $('#tree-index').textContent='悬赏 BOSS';
+    $('#enemy-trait').textContent=challenge.id==='guardian'?`周期护盾 · 剩余 ${money(battle.combat.enemyShield)}`:challenge.id==='toxic'?`剧毒 · 剩余 ${a.bountyRun.poisonLeft} 次毒伤`:enemyAttack(state)?.enraged?'狂暴 · 重击伤害翻倍':'护甲 25% · 蓄力重击';
+    $('#stage-reward').textContent=`胜利 +${challenge.status==='won'?challenge.reward:bountyReward(state,challenge.id)} 改造材料`;
+    if(enemyAttack(state)?.enraged)$('#boss-warning-title').textContent=challenge.id==='berserker'?'狂暴！重击伤害翻倍':`${enemy.name}${enemyCharging(state)?'蓄力中！':'正在准备攻击'}`;
+    if(failed){$('#overlay-title').textContent=challenge.status==='won'?'悬赏完成':'悬赏失败';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 改造材料`:'强化装备与防线后再来，本次未发放材料';}
+  }
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
@@ -360,6 +373,11 @@ function endlessResult(ch){
 function beginDaily(date=new Date()){
  const result=startDaily(state,date);if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}actionResult(result);
 }
+function beginBounty(id){
+ const result=startBounty(state,id);
+ if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}
+ actionResult(result);
+}
 function beginChallenge(tier){
   const result=startChallenge(state,tier);
   if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}
@@ -371,6 +389,9 @@ function leaveChallenge(){
 function challengeResult(){
   const ch=state.challenge;if(!ch||ch.status==='playing')return;
   if(ch.kind==='endless'){endlessResult(ch);return;}
+  if(ch.kind==='bounty'){
+    showDialog(ch.status==='won'?'悬赏完成':'悬赏失败',`<div class="challenge-result"><h3>${BOUNTIES[ch.id].name}</h3><p>${ch.status==='won'?`+${ch.reward} 改造材料，奖励已保存。`:ch.run.failureReason==='timeout'?'60 秒用尽，本次未获得材料。':'小队防线失守，本次未获得材料。'}</p><p>主线进度保留，返回武器页可升级改造。</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="primary-button" data-modal="retry">再次悬赏</button></div>`,choice=>{if(!['leave','retry'].includes(choice))return;const id=ch.id;closeDialog();leaveChallenge();if(choice==='retry')beginBounty(id);});return;
+  }
   if(ch.kind==='daily'){
    showDialog(ch.status==='won'?'每日挑战完成':'防线失守，再试一次',`<div class="challenge-result"><h3>${DAILY_RULES[ch.rule].name}</h3><p>${ch.date} · 击败 ${ch.run.kills} / ${ch.target}</p><h3>+${ch.gemsReward} 钻石 · +${ch.reward} 鱼干</h3><p>${ch.status==='won'?(ch.reward?'首胜奖励已保存。':'该日期奖励已领取，本次为练习。'):'本次未获得奖励。试用小队不变，留意技能释放时机。'}</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="primary-button" data-modal="retry">再次挑战</button></div>`,choice=>{closeDialog();leaveChallenge();if(choice==='retry')beginDaily(new Date(ch.date+'T12:00:00'));});return;
   }
@@ -395,6 +416,7 @@ document.addEventListener('click',event=>{
   if(action==='modify')modificationDialog(id);
   if(action==='skill'&&!manualPause&&!dialog.open&&!honor.isOpen()&&!document.hidden)actionResult(castSkill(state,id));
   if(action==='daily-start')beginDaily();
+  if(action==='bounty-start')beginBounty(id);
   if(action==='endless-start')beginEndless();
   if(action==='endless-choice')endlessChoiceDialog();
   if(action==='endless-honor'){honor.open('endless');updateHUD();}

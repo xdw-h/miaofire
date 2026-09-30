@@ -42,6 +42,8 @@ export class ForestScene {
       this.shieldBroken=!!event.shieldBroken;this.shieldContact=event.shieldDamage>0;
     }
     if(event.type==='enemy-heal')this.particles.push({type:'shield-charge',x:750,y:g-230,text:`再生 +${compact(event.amount)}`,life:0,duration:.8});
+    if(event.type==='bounty-shield')this.particles.push({type:'shield-charge',x:750,y:g-230,text:`护盾 +${event.amount}`,life:0,duration:1});
+    if(event.type==='poison-tick'){this.teamHit=.5;this.particles.push({type:'number',x:270,y:g-120,text:`毒伤 −${event.damage}`,life:0,duration:.8});}
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
       this.targetEnemy??=event.targetEnemy;
@@ -158,7 +160,7 @@ export class ForestScene {
     bush(c,-24,h+8,100,'#77995d','#9bb56f');bush(c,1036,h+18,121,'#82a15f','#a2b975');
     for(let i=0;i<6;i++) {c.save();c.globalAlpha=.5;circle(c,360+i*98+Math.sin(t*.7+i)*15,200+(i*67)%220+Math.cos(t+i)*10,2.2,'#fffce6');c.restore();}
   }
-  enemy(x,y,enemy,t,attackView){drawEnemy(this.ctx,enemy,x,y,t,this.shake,this.reduceMotion,attackView);}
+  enemy(x,y,enemy,t,attackView){drawEnemy(this.ctx,enemy.art?{...enemy,kind:enemy.art}:enemy,x,y,t,this.shake,this.reduceMotion,attackView);}
   attackFlight(view,from,to,g){drawAttackFlight(this.ctx,view,from,to,g,this.reduceMotion);}
   drawDefense(s,g,t,view){
     if(s.challenge)return;

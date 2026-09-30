@@ -24,8 +24,8 @@
 
 ## Task 3：Boss 悬赏（Task 2 完整后执行）
 
-- [ ] 新建 `src/bounties.mjs`、`tests/bounties.test.mjs`，定义三个 Boss 与独立状态，接入 game/enemies/survival，测试周期护盾、毒伤与狂暴重击。
-- [ ] 挑战页提供三项悬赏、奖励展示、失败/退出结算，胜利发改造材料，测试重复结算无奖励、主线冻结及保存。
+- [x] 新建 `src/bounties.mjs`、`tests/bounties.test.mjs`，定义三个 Boss 与独立状态，接入 game/enemies/survival，测试周期护盾、毒伤与狂暴重击。
+- [x] 挑战页提供三项悬赏、奖励展示、失败/退出结算，胜利发改造材料，测试重复结算无奖励、主线冻结及保存。
 
 ## Task 4：伙伴进化（Task 3 完整后执行）
 

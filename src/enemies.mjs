@@ -1,3 +1,4 @@
+import {bountyEnemy} from './bounties.mjs';
 // Encounters are derived from stage position, so existing saves need no new fields.
 export function healthPressure(level){return 1+Math.min(.35,Math.max(0,level-2)*.04);}
 export function baseHealth(level){return Math.round(Math.min(1e120,20*1.36**(level-1)*healthPressure(level)));}
@@ -22,4 +23,4 @@ export function endlessEnemy(waves){
  const template=boss?enemyFor(5,9):enemyFor(5,(wave-1)%3===2?3:(wave-1)%2);
  return {...template,level:wave+4,coinMultiplier:0,hp:Math.min(1e120,Math.round(240*1.14**waves*(boss?2.4:1)))};
 }
-export function encounterFor(s){return s.endlessRun?endlessEnemy(s.endlessRun.waves):s.dailyRule==='bossrush'?{...enemyFor(5,9),level:s.level,hp:Math.round(baseHealth(s.level)*4.5)}:enemyFor(s.level,s.kills);}
+export function encounterFor(s){return s.bountyRun?bountyEnemy(s.bountyRun.id):s.endlessRun?endlessEnemy(s.endlessRun.waves):s.dailyRule==='bossrush'?{...enemyFor(5,9),level:s.level,hp:Math.round(baseHealth(s.level)*4.5)}:enemyFor(s.level,s.kills);}

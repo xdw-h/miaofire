@@ -3,6 +3,7 @@ import {PETS,MILESTONES,progressionDefaults} from './progression.mjs';
 import {defenseStats} from './survival.mjs';
 import {expeditionDefaults,offerBlessing,validateExpedition} from './blessings.mjs';
 import {dailyDefaults,validDate} from './daily.mjs';
+import {BOUNTIES,bountyDefaults} from './bounties.mjs';
 export const SAVE_KEY = 'miaofire.save.v1';
 const numeric = (n, max = 1e150) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
 const integer = (n, max) => numeric(n, max) && Number.isInteger(n);
@@ -61,6 +62,7 @@ export function validateState(s,version=6) {
   if(version>=4&&(!s.daily||s.daily.lastClaimed!==null&&!validDate(s.daily.lastClaimed)))return false;
   if(version>=5&&(!s.endless||!integer(s.endless.bestWaves,99999)))return false;
   if(version>=6&&(!record(s.workshop)||!integer(s.workshop.parts,1e9)))return false;
+  if(s.bounties!==undefined&&(!record(s.bounties)||!Array.isArray(s.bounties.cleared)||new Set(s.bounties.cleared).size!==s.bounties.cleared.length||!s.bounties.cleared.every(id=>Object.hasOwn(BOUNTIES,id))||s.bounties.cleared.length>0&&s.bestEver<10))return false;
   if(version>=3){
     const v=s.survival,d=defenseStats(s);
     if(!v||!numeric(v.hp,d.maxHp)||!numeric(v.shield,d.maxShield)||!numeric(v.bossTime,5)||!numeric(v.damageAgo,3)||!integer(v.attackCount,60)||!integer(v.enemyStrikes??0,60))return false;
@@ -95,6 +97,7 @@ export function loadGame(storage) {
       state.workshop={parts:0};
       for(const weapon of state.inventory){delete weapon.mods;delete weapon.activeMod;}
     }
+    state.bounties??=bountyDefaults();
     restartBattle(state);
     if(parsed.version<6){
       try{

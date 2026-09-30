@@ -11,6 +11,7 @@ import {activeLinks,combatDefaults,clearLinks,syncEncounter,tickCombat,linkShot}
 import {SKILLS,skillDefaults,tickSkills} from './skills.mjs';
 import {dailyDefaults,dailyInfo,dailyAvailable,DAILY_RULES} from './daily.mjs';
 import {endlessDefaults,recordEndless} from './endless.mjs';
+import {BOUNTIES,bountyDefaults,bountyReward,tickBountyShield} from './bounties.mjs';
 export {chooseEndless} from './endless.mjs';
 export {TYPES} from './weapons.mjs';
 export {defenseStats} from './survival.mjs';
@@ -34,6 +35,7 @@ export function createGame() {
     ...progressionDefaults(),
     daily:dailyDefaults(),
     endless:endlessDefaults(),
+    bounties:bountyDefaults(),
     expedition:expeditionDefaults(),combat:combatDefaults(),skills:skillDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
     upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0}, workshop:{parts:0},
@@ -165,6 +167,18 @@ export function startChallenge(s,tier){
   return ok(`开始${CHALLENGES[tier].name}，限时 30 秒`);
 }
 export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');recordEndless(s);s.challenge=null;return ok('已返回主线，继续之前的冒险');}
+export function startBounty(s,id){
+  if(s.challenge)return fail('已有挑战进行中');
+  if(s.expedition?.pending)return fail('请先选择远征祝福');
+  if(s.bestEver<10)return fail('通过第 10 关后解锁 Boss 悬赏');
+  if(!Object.hasOwn(BOUNTIES,id))return fail('悬赏目标不存在');
+  if(!s.equipment.some(Boolean))return fail('请先装备至少一把武器');
+  const run=structuredClone(s);run.challenge=null;run.level=10;
+  run.bountyRun={id,shieldClock:0,shieldStarted:false,poisonLeft:0,poisonClock:0};
+  restartBattle(run);run.hp=targetHealth(run);
+  s.challenge={kind:'bounty',id,run,status:'playing',reward:0};
+  return ok(`开始悬赏：${BOUNTIES[id].name}`);
+}
 export function startEndless(s){
   if(s.challenge)return fail('已有挑战进行中');
   if(s.expedition?.pending)return fail('请先选择远征祝福');
@@ -206,6 +220,18 @@ export function castSkill(s,id){
 
 // Fixed simulation steps make gameplay identical on 30/60/120 Hz displays.
 export function advance(s, delta) {
+  if(s.challenge?.kind==='bounty'){
+    const ch=s.challenge;if(ch.status!=='playing')return [];
+    const events=advance(ch.run,delta);ch.status=ch.run.status;
+    if(ch.status==='won'||ch.status==='failed'){
+      if(ch.status==='won'){
+        ch.reward=bountyReward(s,ch.id);s.workshop.parts=Math.min(1e9,s.workshop.parts+ch.reward);
+        if(!s.bounties.cleared.includes(ch.id))s.bounties.cleared.push(ch.id);
+      }
+      events.push({type:'challenge-result',won:ch.status==='won',reward:ch.reward});
+    }
+    return events;
+  }
   if(s.challenge?.kind==='endless'){
     const ch=s.challenge;if(ch.status!=='playing')return [];
     const events=advance(ch.run,delta);ch.status=ch.run.status;recordEndless(s);
@@ -235,6 +261,7 @@ export function advance(s, delta) {
       events.push(s.challenge?{type:'challenge-result',won:false,reward:0}:{type:'failed',reason:'timeout'}); break;
     }
     syncEncounter(battle,targetId(s),currentEnemy(s));
+    events.push(...tickBountyShield(s,STEP));
     tickSkills(battle,STEP);
     const healed=tickCombat(battle,STEP,currentEnemy(s));
     if(healed)events.push({type:'enemy-heal',amount:healed,targetId:targetId(s)});
@@ -293,6 +320,10 @@ export function advance(s, delta) {
         s.challengeClears=Math.max(s.challengeClears,battle.tier+1);battle.reward=reward;battle.status='won';battle.accumulator=0;
         events.push({type:'kill',coins:0,targetId:id,nextTargetId:null});
         events.push({type:'challenge-result',won:true,reward});break;
+      }
+      if(s.bountyRun){
+        s.status='won';s.accumulator=0;
+        events.push({type:'kill',coins:0,targetId:id,nextTargetId:null,enemyKind:enemy.kind});break;
       }
       if(s.dailyRule){
         s.kills++;s.totalKills++;
