@@ -3,6 +3,8 @@ import {baseHealth,enemyFor,stageReward,damageToEnemy,encounterFor} from './enem
 export {stageReward,damageToEnemy} from './enemies.mjs';
 import {resetSurvival,resetEnemyAttack,advanceSurvival,defenseStats} from './survival.mjs';
 import {TYPES,resolveWeaponShot,wardCharge} from './weapons.mjs';
+import {buyModification,equipModification,upgradeModification,dismantleModifications,MODIFICATIONS,modificationLevel,hasModifications} from './modifications.mjs';
+export {buyModification,equipModification,upgradeModification,dismantleModifications,MODIFICATIONS,modificationLevel,hasModifications} from './modifications.mjs';
 import {expeditionDefaults,blessingCount,offerBlessing} from './blessings.mjs';
 export {chooseBlessing} from './blessings.mjs';
 import {activeLinks,combatDefaults,clearLinks,syncEncounter,tickCombat,linkShot} from './combat-effects.mjs';
@@ -34,7 +36,7 @@ export function createGame() {
     endless:endlessDefaults(),
     expedition:expeditionDefaults(),combat:combatDefaults(),skills:skillDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
-    upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0},
+    upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0}, workshop:{parts:0},
     inventory: [{id: 'w1', type: 'pistol', tier: 0}],
     equipment: ['w1', null, null], nextId: 2,
     kills: 0, totalKills: 0, elapsed: 0, hp: treeHealth(1),
@@ -119,6 +121,7 @@ export function mergeWeapons(s, first, second, random = Math.random) {
   if (!a || !b) return fail('合成材料不存在');
   if (s.equipment.includes(first) || s.equipment.includes(second)) return fail('请先卸下要合成的武器');
   if (a.type !== b.type || a.tier !== b.tier) return fail('需要同类型、同等级的两把武器');
+  if (hasModifications(a) || hasModifications(b)) return fail('请先拆除改造后再合成');
   if (a.tier >= TIERS.length - 1) return fail('SS 已是最高等级');
   const weapon = {id: `w${s.nextId++}`, type: randomType(random), tier: a.tier + 1};
   s.inventory = s.inventory.filter(w => w.id !== first && w.id !== second);
@@ -235,6 +238,11 @@ export function advance(s, delta) {
     tickSkills(battle,STEP);
     const healed=tickCombat(battle,STEP,currentEnemy(s));
     if(healed)events.push({type:'enemy-heal',amount:healed,targetId:targetId(s)});
+    if (battle.combat?.pendingEvents?.length) {
+      events.push(...battle.combat.pendingEvents);
+      battle.combat.pendingEvents = [];
+      if (battle.hp <= 0) battle.cooldowns = [0, 0, 0];
+    }
     for (let slot = 0; slot < 3; slot++) {
       const cat = current.cats[slot];
       if (!cat) continue;
@@ -244,8 +252,27 @@ export function advance(s, delta) {
       const enemy=currentEnemy(s);
       const boost=(enemy.kind==='boss'?1+.12*blessingCount(s,'hunter'):1)*(!s.challenge&&s.survival.hp<=defenseStats(s).maxHp*.35?1+.2*blessingCount(s,'courage'):1);
       syncEncounter(battle,targetId(s),enemy);
+      const targetKey=targetId(s);
+      let ricochetKilled = false;
+      if (battle.combat.ricochetDamage > 0 && battle.combat.ricochetSource !== targetKey && !battle.combat.ricochetApplied) {
+        const raw = battle.combat.ricochetDamage;
+        const ricDamage = damageToEnemy(raw, enemy);
+        const shieldDamage=Math.min(battle.combat.enemyShield,ricDamage); battle.combat.enemyShield-=shieldDamage;
+        const dealt=ricDamage-shieldDamage; battle.hp=Math.max(0,battle.hp-dealt);
+        ricochetKilled = battle.hp <= 0;
+        events.push({type:'ricochet-hit',damage:dealt,targetId:targetKey,targetLevel:enemy.level,targetEnemy:enemy,rawDamage:raw,enemyShieldDamage:shieldDamage});
+        battle.combat.ricochetDamage=0; battle.combat.ricochetApplied=true;
+      }
       const link=linkShot(s,battle,cat);
-      const shot=resolveWeaponShot({...cat,damage:cat.damage*boost*link.multiplier*(battle.skills.burst>0?1.6:1)},enemy,battle.hp),{damage}=shot;
+      const shot=resolveWeaponShot({...cat,damage:cat.damage*boost*link.multiplier*(battle.skills.burst>0?1.6:1)},enemy,battle.hp);
+      let damage = shot.damage;
+      if (ricochetKilled) { shot.damage = 0; damage = 0; }
+      if (shot.mod === 'burn') {
+        const burnPct=[0,.08,.12,.16][shot.modLevel]||0;
+        const burns=battle.combat.burns??(battle.combat.burns=[]);
+        if (burns.length>=3) burns.shift();
+        burns.push({damage:Math.max(1,Math.round(shot.rawDamage*burnPct)),remaining:3,time:0});
+      }
       shot.link=link.label;shot.enemyShieldDamage=Math.min(battle.combat.enemyShield,damage);battle.combat.enemyShield-=shot.enemyShieldDamage;
       let shieldRestored=0;
       if(cat.type==='ward'&&!s.challenge&&s.dailyRule!=='drought'){
@@ -256,6 +283,11 @@ export function advance(s, delta) {
       const id=targetId(s);
       events.push({type:'shot',slot,gun:cat.type,...shot,shieldRestored,targetId:id,targetLevel:s.level,targetEnemy:enemy});
       if (battle.hp > 0) continue;
+      if (shot.mod === 'ricochet' && !battle.combat.ricochetApplied) {
+        battle.combat.ricochetDamage = shot.rawDamage * ([0,.25,.35,.45][shot.modLevel]||0);
+        battle.combat.ricochetSource = id;
+      }
+      battle.combat.ricochetApplied = false;
       if(s.challenge){
         const reward=challengeReward(s,battle.tier);s.fish=bounded(s.fish+reward);
         s.challengeClears=Math.max(s.challengeClears,battle.tier+1);battle.reward=reward;battle.status='won';battle.accumulator=0;

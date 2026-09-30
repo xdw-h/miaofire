@@ -6,7 +6,7 @@ import {SAVE_KEY,saveGame,loadGame,validateState} from '../src/storage.mjs';
 const store=()=>{const map=new Map();return {getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,value)};};
 const state=()=>({...createGame(),endless:{bestWaves:0}});
 
-test('v1 through v4 migrate to v5 only after an exact raw backup and ignore unknown endless data',()=>{
+test('v1 through v4 migrate to v6 only after an exact raw backup and ignore unknown endless data',()=>{
   for(const version of [1,2,3,4]){
     const db=store(),s=state();Object.assign(s,{coins:321,gems:88,crystals:7,totalKills:12});
     s.endless={bestWaves:999999};
@@ -18,7 +18,7 @@ test('v1 through v4 migrate to v5 only after an exact raw backup and ignore unkn
     for(const key of ['coins','gems','crystals','totalKills','inventory','equipment'])assert.deepEqual(loaded.state[key],s[key]);
     assert.equal(db.getItem(`${SAVE_KEY}.backup-v${version}`),raw);
     assert.deepEqual(writes,[`${SAVE_KEY}.backup-v${version}`,SAVE_KEY]);
-    assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,5);
+    assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,6);
     assert.equal(loadGame(db).migrated,undefined);
   }
 });
@@ -57,7 +57,7 @@ test('v5 best wave bounds survive refresh and rebirth',()=>{
   for(const bestWaves of [0,1,99999]){
     const db=store(),s=state();s.endless.bestWaves=bestWaves;
     Object.assign(s,{level:4,bestThisRun:3,bestEver:3});
-    assert.equal(saveGame(db,s).ok,true);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,5);
+    assert.equal(saveGame(db,s).ok,true);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,6);
     const loaded=loadGame(db);assert.equal(loaded.blocked,false);
     assert.equal(loaded.state.endless.bestWaves,bestWaves);
     assert.equal(rebirth(loaded.state).ok,true);assert.equal(loaded.state.endless.bestWaves,bestWaves);
@@ -78,7 +78,7 @@ test('saving during endless mode stores only the best record and strips the runt
   const db=store(),s=state();s.endless.bestWaves=12;s.coins=123;
   s.challenge={kind:'endless',status:'playing',run:{endlessRun:{waves:13},marker:'runtime only'}};
   assert.equal(saveGame(db,s).ok,true);
-  const saved=JSON.parse(db.getItem(SAVE_KEY));assert.equal(saved.version,5);
+  const saved=JSON.parse(db.getItem(SAVE_KEY));assert.equal(saved.version,6);
   assert.equal(saved.state.challenge,null);assert.equal(db.getItem(SAVE_KEY).includes('runtime only'),false);
   const loaded=loadGame(db);assert.equal(loaded.blocked,false);assert.equal(loaded.state.challenge,null);
   assert.equal(loaded.state.endless.bestWaves,12);assert.equal(loaded.state.coins,123);

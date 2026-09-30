@@ -12,6 +12,8 @@ import {MILESTONES,CHALLENGES,petBonus,claimPet,carryPet,feedPet,claimMilestone,
 import {petsPanel,challengesPanel,companionLabel} from './progression-ui.mjs';
 import {BLESSINGS,chooseBlessing} from './blessings.mjs';
 import {activeLinks} from './combat-effects.mjs';
+import {modificationPanel} from './modifications-ui.mjs';
+import {buyModification,equipModification,upgradeModification,dismantleModifications} from './game.mjs';
 import {SKILLS} from './skills.mjs';
 import {castSkill,startDaily} from './game.mjs';
 import {dailyPanel,linksGuide,DAILY_RULES} from './expedition-ui.mjs';
@@ -136,6 +138,17 @@ function showDialog(title, content, handler=null) {
   dialog.showModal();updateHUD();
 }
 function closeDialog(){dialog.close();dialogHandler=null;updateHUD();}
+function modificationDialog(weaponId){
+  showDialog('武器改造',modificationPanel(state,weaponId),(action,button)=>{
+    const id=button.dataset.modId,wid=button.dataset.weaponId;
+    const modId=id||null;
+    const fn=action==='mod-buy'?buyModification:action==='mod-upgrade'?upgradeModification:action==='mod-equip'?equipModification:action==='mod-dismantle'?dismantleModifications:null;
+    if(!fn)return;
+    const result=action==='mod-equip'?fn(state,wid,modId):fn(state,wid,id);
+    actionResult(result,true);
+    if(result.ok)modificationDialog(wid);
+  });
+}
 function blessingsDialog(){
  const e=state.expedition;
  const owned=Object.entries(BLESSINGS).filter(([id])=>e.choices.includes(id)).map(([id,b])=>`<li><b>${b.name} ×${e.choices.filter(v=>v===id).length}</b> · ${b.desc}</li>`).join('');
@@ -145,7 +158,8 @@ function blessingsDialog(){
 }
 dialog.addEventListener('click',e=>{
   const target=e.target.closest('button');
-  if(target?.dataset.modal){dialogHandler?.(target.dataset.modal,target);}
+  const dialogAction=target?.dataset.modal||target?.dataset.action;
+  if(dialogAction){dialogHandler?.(dialogAction,target);}
   else if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeDialog();}
 });
 dialog.addEventListener('close',()=>updateHUD());
@@ -196,7 +210,7 @@ function mergePartner(w) {return state.inventory.find(other=>other.id!==w.id&&ot
 function weaponCard(w) {
   const equipped=state.equipment.includes(w.id), slot=state.equipment.indexOf(w.id), canMerge=!equipped&&w.tier<4&&mergePartner(w);
   const mergeReason=w.tier===4?'已达到最高等级':equipped?'先卸下武器才能合成':'还需要一把同类型同等级的未装备武器';
-  return `<article class="weapon-card${equipped?' equipped':''}" data-weapon="${w.id}"><div class="weapon-card-top"><span class="tier t${w.tier}">${TIERS[w.tier]}</span><span class="equip-tag">${equipped?`队员 ${slot+1} · 出战中`:'待命'}</span></div>${weaponSvg(w.type,w.tier)}<h4>${TYPES[w.type].name}</h4><span class="weapon-role">${TYPES[w.type].role}</span><p>基础秒伤 ${decimal(weaponPower(state,w).dps)}</p><p class="weapon-trait">${weaponTrait(w)}</p><div class="weapon-actions"><button class="small-button" data-action="${equipped?'unequip':'equip'}" data-id="${w.id}" data-slot="${slot}" aria-label="${equipped?'卸下':'装备'}${TIERS[w.tier]}级${TYPES[w.type].name}">${equipped?'卸下':'装备'}</button><button class="small-button merge" data-action="merge" data-id="${w.id}" ${canMerge?'':'disabled'} title="${canMerge?'消耗两把同款同级武器，随机获得更高一级武器':mergeReason}" aria-label="合成${TIERS[w.tier]}级${TYPES[w.type].name}">合成</button></div></article>`;
+  return `<article class="weapon-card${equipped?' equipped':''}" data-weapon="${w.id}"><div class="weapon-card-top"><span class="tier t${w.tier}">${TIERS[w.tier]}</span><span class="equip-tag">${equipped?`队员 ${slot+1} · 出战中`:'待命'}</span></div>${weaponSvg(w.type,w.tier)}<h4>${TYPES[w.type].name}</h4><span class="weapon-role">${TYPES[w.type].role}</span><p>基础秒伤 ${decimal(weaponPower(state,w).dps)}</p><p class="weapon-trait">${weaponTrait(w)}</p><div class="weapon-actions"><button class="small-button" data-action="${equipped?'unequip':'equip'}" data-id="${w.id}" data-slot="${slot}" aria-label="${equipped?'卸下':'装备'}${TIERS[w.tier]}级${TYPES[w.type].name}">${equipped?'卸下':'装备'}</button><button class="small-button" data-action="modify" data-id="${w.id}" ${state.challenge?'disabled':''}>改造</button><button class="small-button merge" data-action="merge" data-id="${w.id}" ${canMerge?'':'disabled'} title="${canMerge?'消耗两把同款同级武器，随机获得更高一级武器':mergeReason}" aria-label="合成${TIERS[w.tier]}级${TYPES[w.type].name}">合成</button></div></article>`;
 }
 function renderSquad() {
   const a=actor();
@@ -315,7 +329,7 @@ function guide() {
   showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><div class="guide-step"><span>06</span><div><b>选祝福、配联动、迎战精英</b><p>每过 3 关暂停三选一，祝福叠加到转生。弩＋狙击标记增伤；护盾枪＋火箭积累蓄能；手枪＋冲锋枪加射速。第 4 关起出现再生、狂暴和护盾精英，留意名字、光环及特性。</p></div></div><div class="guide-step"><span>07</span><div><b>手动技能与每日试炼</b><p>防线下方点击补盾、爆发和急救，冷却分别为 18、22、25 秒。急救不消耗鱼干。通过第 3 关后，在挑战页体验固定试用小队的每日规则，首胜获得 20 钻石和 40 鱼干。同日重复仅练习，主线进度会保留。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>重置游戏养成进度，重新领取初始补给。荣誉榜最佳记录保留。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 无尽守卫版 1.9.0<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>重置游戏养成进度，重新领取初始补给。荣誉榜最佳记录保留。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 武器改造版 1.10.0<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound')toggleSound();
     if(action==='sound-test'){if(gameAudio.enabled)gameAudio.play('test');else void gameAudio.enable();}
     if(action==='reset')confirmReset();
@@ -378,6 +392,7 @@ document.addEventListener('click',event=>{
   if(action==='guide')guide();
   if(action==='honor'){honor.open();updateHUD();}
   if(action==='links')showDialog('三只猫，组合更强',linksGuide());
+  if(action==='modify')modificationDialog(id);
   if(action==='skill'&&!manualPause&&!dialog.open&&!honor.isOpen()&&!document.hidden)actionResult(castSkill(state,id));
   if(action==='daily-start')beginDaily();
   if(action==='endless-start')beginEndless();

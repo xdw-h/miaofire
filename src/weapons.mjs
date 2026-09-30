@@ -13,6 +13,14 @@ export function wardCharge(tier){return Math.round(2*1.5**tier);}
 export function weaponTrait(weapon){return weapon.type==='ward'?`每次开火补盾 +${wardCharge(weapon.tier)} · 主线 / 每日，断补给除外`:TYPES[weapon.type].description;}
 export function resolveWeaponShot(cat,enemy,hp){
  const bonus=cat.type==='sniper'&&enemy.kind==='boss'?1.35:cat.type==='rocket'&&hp<=enemy.hp*.3?1.5:1;
- const damage=damageToEnemy(cat.damage*bonus,cat.type==='crossbow'?{armor:0}:enemy);
- return {damage,bonus:bonus>1,armored:enemy.armor>0&&cat.type!=='crossbow'};
+  const mod = cat.activeMod && cat.mods?.[cat.activeMod] ? cat.activeMod : null;
+  const level = mod ? Math.max(1, Math.min(3, Number(cat.mods[mod]))) : 0;
+  const raw = cat.damage * bonus;
+  let target = cat.type==='crossbow' ? {armor:0} : enemy;
+  if (mod === 'pierce' && enemy.armor > 0) {
+    const pierce = [0,.5,.75,1][level];
+    target = {...enemy, armor: enemy.armor * (1-pierce)};
+  }
+  const damage=damageToEnemy(raw,target);
+  return {damage,rawDamage:raw,bonus:bonus>1,armored:enemy.armor>0&&cat.type!=='crossbow',mod,modLevel:level};
 }

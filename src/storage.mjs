@@ -6,8 +6,28 @@ import {dailyDefaults,validDate} from './daily.mjs';
 export const SAVE_KEY = 'miaofire.save.v1';
 const numeric = (n, max = 1e150) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
 const integer = (n, max) => numeric(n, max) && Number.isInteger(n);
+const MODIFICATION_IDS = new Set(['pierce', 'ricochet', 'burn']);
+const record = value => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
 
-export function validateState(s,version=5) {
+function validateWeaponModifications(weapon) {
+  if (Object.hasOwn(weapon, 'mods')) {
+    if (!record(weapon.mods)) return false;
+    for (const [id, level] of Object.entries(weapon.mods)) {
+      if (!MODIFICATION_IDS.has(id) || !integer(level, 3)) return false;
+    }
+  }
+  if (Object.hasOwn(weapon, 'activeMod')) {
+    const id = weapon.activeMod;
+    if (id !== null && (!MODIFICATION_IDS.has(id) || (weapon.mods?.[id] ?? 0) < 1)) return false;
+  }
+  return true;
+}
+
+export function validateState(s,version=6) {
   if (!s || typeof s !== 'object') return false;
   if (!['coins', 'gems', 'crystals'].every(key => numeric(s[key]))) return false;
   if (!integer(s.level, 10000) || s.level < 1 || !integer(s.bestThisRun, 10000) || !integer(s.bestEver, 10000)) return false;
@@ -19,6 +39,7 @@ export function validateState(s,version=5) {
   for (const weapon of s.inventory) {
     if (!weapon || typeof weapon.id !== 'string' || !/^w[1-9]\d*$/.test(weapon.id) || ids.has(weapon.id)) return false;
     if (!Object.hasOwn(TYPES, weapon.type) || !integer(weapon.tier, 4)) return false;
+    if (version >= 6 && !validateWeaponModifications(weapon)) return false;
     ids.add(weapon.id);
   }
   if (!integer(s.nextId, Number.MAX_SAFE_INTEGER) || s.nextId <= Math.max(...s.inventory.map(w => Number(w.id.slice(1))))) return false;
@@ -39,6 +60,7 @@ export function validateState(s,version=5) {
   if(version>=4&&!validateExpedition(s.expedition,s.bestThisRun))return false;
   if(version>=4&&(!s.daily||s.daily.lastClaimed!==null&&!validDate(s.daily.lastClaimed)))return false;
   if(version>=5&&(!s.endless||!integer(s.endless.bestWaves,99999)))return false;
+  if(version>=6&&(!record(s.workshop)||!integer(s.workshop.parts,1e9)))return false;
   if(version>=3){
     const v=s.survival,d=defenseStats(s);
     if(!v||!numeric(v.hp,d.maxHp)||!numeric(v.shield,d.maxShield)||!numeric(v.bossTime,5)||!numeric(v.damageAgo,3)||!integer(v.attackCount,60)||!integer(v.enemyStrikes??0,60))return false;
@@ -49,7 +71,7 @@ export function validateState(s,version=5) {
 
 export function saveGame(storage, state) {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify({version: 5, state:{...state,challenge:null}}));
+    storage.setItem(SAVE_KEY, JSON.stringify({version: 6, state:{...state, workshop: state.workshop === undefined ? {parts: 0} : state.workshop, challenge:null}}));
     return {ok: true};
   } catch {
     return {ok: false, warning: '浏览器无法保存进度。本次仍可试玩，请不要关闭页面。'};
@@ -63,17 +85,22 @@ export function loadGame(storage) {
   if (raw === null) return {state: createGame(), blocked: false, warning: ''};
   try {
     const parsed = JSON.parse(raw);
-    if (![1,2,3,4,5].includes(parsed.version) || !validateState(parsed.state,parsed.version)) throw new Error('Invalid save');
+    if (![1,2,3,4,5,6].includes(parsed.version) || !validateState(parsed.state,parsed.version)) throw new Error('Invalid save');
     const state = parsed.version===1?{...parsed.state,...progressionDefaults()}:parsed.state;
     if(parsed.version<3)state.upgrades={...state.upgrades,health:0,shield:0};
     if(parsed.version<4){state.daily=dailyDefaults();state.expedition=expeditionDefaults();offerBlessing(state,Math.floor(state.bestThisRun/3)*3);}
     if(parsed.version<5)state.endless={bestWaves:0};
+    if(parsed.version<6){
+      state.challenge=null;
+      state.workshop={parts:0};
+      for(const weapon of state.inventory){delete weapon.mods;delete weapon.activeMod;}
+    }
     restartBattle(state);
-    if(parsed.version<5){
+    if(parsed.version<6){
       try{
         const backupKey=`${SAVE_KEY}.backup-v${parsed.version}`;
         if(storage.getItem(backupKey)===null)storage.setItem(backupKey,raw);
-        storage.setItem(SAVE_KEY,JSON.stringify({version:5,state}));
+        storage.setItem(SAVE_KEY,JSON.stringify({version:6,state}));
       }catch{
         return {state,blocked:true,restored:true,warning:'旧进度已读取，但备份或升级保存失败。原档已保留；当前为临时试玩，请释放浏览器存储空间后刷新。'};
       }
