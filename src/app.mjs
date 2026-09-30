@@ -16,6 +16,8 @@ import {SKILLS} from './skills.mjs';
 import {castSkill,startDaily} from './game.mjs';
 import {dailyPanel,linksGuide,DAILY_RULES} from './expedition-ui.mjs';
 import {dailyAvailable,localDate} from './daily.mjs';
+import {createHonorBoard} from './honor-ui.mjs';
+import {scoreFromGame} from './leaderboard-rules.mjs';
 const actor=()=>state.challenge?.kind==='daily'?state.challenge.run:state;
 
 let storage;
@@ -31,7 +33,7 @@ $('#app').innerHTML = `
 <div class="shell">
   <header class="topbar">
     <div class="brand"><div class="brand-mark">${icon('paw')}</div><div><div class="brand-name">喵火前线</div><div class="brand-sub">MIAOFIRE · IDLE ADVENTURE</div></div></div>
-    <nav class="nav-actions" aria-label="游戏工具"><span class="nav-label"><i></i>一场轻松的森林远征</span><button class="text-button" data-action="guide" aria-label="玩法指南">${icon('info')}玩法指南</button><button class="icon-button" data-action="settings" aria-label="设置">${icon('gear')}</button></nav>
+    <nav class="nav-actions" aria-label="游戏工具"><span class="nav-label"><i></i>一场轻松的森林远征</span><button class="icon-button" data-action="honor" aria-label="荣誉榜">${icon('trophy')}</button><button class="text-button" data-action="guide" aria-label="玩法指南">${icon('info')}玩法指南</button><button class="icon-button" data-action="settings" aria-label="设置">${icon('gear')}</button></nav>
   </header>
   <section class="intro" aria-label="冒险与资源">
     <div><div class="eyebrow">LITTLE PAWS. BIG FIREPOWER.</div><h1>小爪子，大火力。</h1><p>让猫咪忙着冒险，你只管享受变强的快乐。</p></div>
@@ -54,7 +56,7 @@ $('#app').innerHTML = `
           <div class="scene-tools"><button class="icon-button" data-action="sound" aria-label="开启声音" aria-pressed="false" id="sound-toggle">${icon('mute')}</button><button class="icon-button" data-action="pause" aria-label="暂停战斗" aria-pressed="false" id="pause-toggle">${icon('pause')}</button></div>
           <div id="stage-flash" class="stage-flash" aria-hidden="true"></div>
           <div id="no-cats" class="no-cats" hidden>小队还没有武器。打开「武器」，装备后就会自动出战。</div>
-          <div id="battle-overlay" class="battle-overlay" hidden><div class="overlay-card">${icon('paw')}<h2 id="overlay-title">猫咪休息中</h2><p id="overlay-copy">伸个懒腰，冒险等你回来。</p><button class="primary-button wide" id="overlay-action" data-action="resume">继续冒险 ${icon('play')}</button></div></div>
+          <div id="battle-overlay" class="battle-overlay" hidden><div class="overlay-card">${icon('paw')}<h2 id="overlay-title">猫咪休息中</h2><p id="overlay-copy">伸个懒腰，冒险等你回来。</p><button class="primary-button wide" id="overlay-action" data-action="resume">继续冒险 ${icon('play')}</button><button class="secondary-button wide honor-end" id="honor-end" data-action="honor" hidden>留下名字 · 登上荣誉榜</button></div></div>
         </div>
         <section class="defense-panel" aria-label="小队生命与护盾">
           <div class="defense-heading"><b id="difficulty-label">小队防线 · 练习</b><span id="shield-status">护盾就绪 · 自动防御</span></div>
@@ -65,6 +67,7 @@ $('#app').innerHTML = `
         </section>
         <div class="progress-strip"><div class="progress-heading"><b id="progress-label">本关进度 · 0 / 10</b><span id="stage-reward">通关 <b>+10 钻石 · +3 鱼干</b></span></div><div class="stage-path" id="stage-path" aria-hidden="true">${Array.from({length:10},(_,i)=>`<span class="path-stop${i===9?' finish':''}">${i===9?icon('gem'):''}</span>`).join('')}</div></div>
       </div>
+      <button class="honor-entry" data-action="honor">${icon('trophy')}<b>森林荣誉榜</b><span>留名上榜 · 查看前 100 名</span></button>
       <div id="boss-report" class="boss-report" role="status" hidden></div>
       <button class="companion-strip blessing-strip" data-action="blessings"><span>✦ 远征祝福</span><span id="blessing-summary">每过 3 关，三选一强化</span>${icon('arrow')}</button>
       <button class="tactic-strip" data-action="links" id="tactic-strip" aria-label="查看武器联动"></button>
@@ -98,6 +101,7 @@ scene.onCoins=()=>{
   }
 };
 const dialog = $('#dialog');
+const honor=createHonorBoard({storage,getScore:()=>scoreFromGame(state),onOpen:closeDialog,onClose:updateHUD});
 const gameAudio = new GameAudio(undefined,()=>syncSound());
 function notify(message, error=false) {
   const el = document.createElement('div'); el.className=`toast${error?' error':''}`; el.textContent=message;
@@ -244,11 +248,12 @@ function updateHUD() {
   $('#no-cats').hidden=a.equipment.some(Boolean);
   const failed=battle.status==='failed'||battle.status==='won';
   $('#battle-overlay').hidden=!failed&&!manualPause;
+  $('#honor-end').hidden=!failed||!!challenge;
   if(failed&&daily){$('#overlay-title').textContent=challenge.status==='won'?'每日挑战完成':'每日挑战结束';$('#overlay-copy').textContent=challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:'尝试在敌人重击前补盾，保留爆发应对 Boss。';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').textContent='查看结算';}
   else if(failed&&challenge){$('#overlay-title').textContent=challenge.status==='won'?'补给挑战成功！':'木偶还站着，再变强一点';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 鱼干，奖励已保存`:'本次未获得奖励，返回主线升级火力后再来';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').innerHTML=`查看结算 ${icon('arrow')}`;}
   else if(failed){$('#overlay-title').textContent=state.failureReason==='defeat'?'小队生命耗尽':enemy.kind==='boss'?'古木守卫挡住了去路':'这个对手有点顽强';$('#overlay-copy').textContent=state.failureReason==='defeat'?'已获得的资源会保留。强化生命和护盾，再满状态挑战本关！':'时间用尽。已获得的资源会保留，升级火力后再来一次！';$('#overlay-action').dataset.action='retry';$('#overlay-action').innerHTML=`再试一次 ${icon('refresh')}`;}
   else {$('#overlay-title').textContent='猫咪休息中';$('#overlay-copy').textContent='伸个懒腰，冒险等你回来。';$('#overlay-action').dataset.action='resume';$('#overlay-action').innerHTML=`继续冒险 ${icon('play')}`;}
-  $('#live-label').textContent=failed?'等待再次出发':state.expedition.pending?'等待选择祝福':manualPause||dialog.open?'猫咪休息中':'自动战斗中';
+  $('#live-label').textContent=failed?'等待再次出发':state.expedition.pending?'等待选择祝福':manualPause||dialog.open||honor.isOpen()?'猫咪休息中':'自动战斗中';
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
@@ -270,7 +275,7 @@ function updateDefenseHUD(enemy){
     $(`#team-${key}-fill`).style.width=`${value/max*100}%`;$(`#team-${key}-track`).setAttribute('aria-valuenow',Math.round(value/max*100));
   }
   $('.defense-panel').classList.toggle('low-health',v.hp/d.maxHp<=.3);
-  $('#shield-status').textContent=material?'主线防线已暂停':a.status==='failed'?'重试后满状态恢复':manualPause||dialog.open?'防线计时已暂停':v.shield>=d.maxShield?`护盾就绪 · 回盾 ${shieldRecovery(a)}/秒`:v.damageAgo<SHIELD_DELAY?`${Math.max(0,SHIELD_DELAY-v.damageAgo).toFixed(1)} 秒后回盾`:`护盾恢复中 · 每秒 +${shieldRecovery(a)}`;
+  $('#shield-status').textContent=material?'主线防线已暂停':a.status==='failed'?'重试后满状态恢复':manualPause||dialog.open||honor.isOpen()?'防线计时已暂停':v.shield>=d.maxShield?`护盾就绪 · 回盾 ${shieldRecovery(a)}/秒`:v.damageAgo<SHIELD_DELAY?`${Math.max(0,SHIELD_DELAY-v.damageAgo).toFixed(1)} 秒后回盾`:`护盾恢复中 · 每秒 +${shieldRecovery(a)}`;
   $('#boss-warning').classList.toggle('charging',charging);
   $('#charge-track').hidden=!active;$('#charge-fill').style.width=`${attack?v.bossTime/attack.cycle*100:0}%`;
   $('#boss-warning-title').textContent=material?'训练木偶不会反击':a.status==='failed'?a.failureReason==='defeat'?'防线失守 · 强化后再挑战':'本关时间用尽':attack?.enraged?`狂暴！${charging?'重击蓄力中':'攻击 +40%'}`:charging?`${enemy.name}蓄力中！`:`${enemy.name}正在准备攻击`;
@@ -286,7 +291,7 @@ function updateTactics(){
  $('#tactic-strip').textContent=links.length?links.map(l=>l.name).join(' · ')+(c.markTime>0?` · 标记 ${c.markTime.toFixed(1)}秒`:'')+(c.charge?` · 蓄能 ${c.charge}/3`:''):'武器联动 · 查看三种搭配';
  for(const [id,k]of Object.entries(SKILLS)){
   const el=$(`#skill-${id}`),cd=b.skills.cooldowns[id],material=!!state.challenge&&state.challenge.kind!=='daily',full=id==='shield'?a.survival.shield>=defenseStats(a).maxShield:id==='heal'?a.survival.hp>=defenseStats(a).maxHp:false;
-  el.disabled=manualPause||dialog.open||document.hidden||b.status!=='playing'||!!state.expedition.pending||cd>1e-8||id!=='burst'&&(material||full);
+  el.disabled=manualPause||dialog.open||honor.isOpen()||document.hidden||b.status!=='playing'||!!state.expedition.pending||cd>1e-8||id!=='burst'&&(material||full);
   el.querySelector('small').textContent=id==='burst'&&b.skills.burst>0?`生效 ${b.skills.burst.toFixed(1)}秒`:cd>0?`冷却 ${Math.ceil(cd)}秒`:id!=='burst'&&material?'木偶无需恢复':full?'已满':'点击释放';
   el.classList.toggle('active',id==='burst'&&b.skills.burst>0);
  }
@@ -304,7 +309,7 @@ function guide() {
   showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><div class="guide-step"><span>06</span><div><b>选祝福、配联动、迎战精英</b><p>每过 3 关暂停三选一，祝福叠加到转生。弩＋狙击标记增伤；护盾枪＋火箭积累蓄能；手枪＋冲锋枪加射速。第 4 关起出现再生、狂暴和护盾精英，留意名字、光环及特性。</p></div></div><div class="guide-step"><span>07</span><div><b>手动技能与每日试炼</b><p>防线下方点击补盾、爆发和急救，冷却分别为 18、22、25 秒。急救不消耗鱼干。通过第 3 关后，在挑战页体验固定试用小队的每日规则，首胜获得 20 钻石和 40 鱼干。同日重复仅练习，主线进度会保留。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>清空此游戏的全部进度，重新领取初始补给。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林远征版 1.7.0<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>重置游戏养成进度，重新领取初始补给。荣誉榜最佳记录保留。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林远征版 1.8.0<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound')toggleSound();
     if(action==='sound-test'){if(gameAudio.enabled)gameAudio.play('test');else void gameAudio.enable();}
     if(action==='reset')confirmReset();
@@ -349,8 +354,9 @@ document.addEventListener('click',event=>{
   if(action==='sound')toggleSound();
   if(action==='retry'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(retry(state));}
   if(action==='guide')guide();
+  if(action==='honor'){honor.open();updateHUD();}
   if(action==='links')showDialog('三只猫，组合更强',linksGuide());
-  if(action==='skill'&&!manualPause&&!dialog.open&&!document.hidden)actionResult(castSkill(state,id));
+  if(action==='skill'&&!manualPause&&!dialog.open&&!honor.isOpen()&&!document.hidden)actionResult(castSkill(state,id));
   if(action==='daily-start')beginDaily();
   if(action==='blessings')blessingsDialog();
   if(action==='settings')settings();
@@ -378,7 +384,7 @@ document.addEventListener('click',event=>{
   }
   if(action==='rebirth') {
     const reward=rebirthReward(state);
-    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级、当前关卡和远征祝福。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='confirm'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(rebirth(state));setTab('growth');}});
+    showDialog('带着紫晶，重新出发',`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>获得 ${money(reward)} 颗紫晶</h3><p>永久攻击加成：+${decimal(state.crystals*10)}% → +${decimal((state.crystals+reward)*10)}%</p></div><p><b>保留：</b>武器、装备、钻石、紫晶、伙伴和鱼干。<br><b>重置：</b>金币、金币升级、当前关卡和远征祝福。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="honor">先留名上榜</button><button class="secondary-button" data-modal="cancel">再冒险一会</button><button class="primary-button" data-modal="confirm">确认转生</button></div>`,choice=>{closeDialog();if(choice==='honor'){honor.open();updateHUD();}if(choice==='confirm'){manualPause=false;scene.resetEffects();clearDefenseFeedback();actionResult(rebirth(state));setTab('growth');}});
   }
 });
 
@@ -387,7 +393,7 @@ function frame(now) {
   const delta=Math.min(.1,Math.max(0,(now-last)/1000));last=now;
   const today=localDate();if(today!==lastDailyDate){lastDailyDate=today;if(selectedTab==='challenges')renderPanel();}
   gameAudio.setPaused(document.hidden);gameAudio.tick();
-  const paused=manualPause||dialog.open||document.hidden||battleState(state).status!=='playing';
+  const paused=manualPause||dialog.open||honor.isOpen()||document.hidden||battleState(state).status!=='playing';
   if(!paused)for(const event of advance(state,delta)) {
     scene.event(event);
     if(event.type==='shot')sound('shot',event.gun);
@@ -407,7 +413,8 @@ function frame(now) {
     if(event.type==='blessing'){persist();blessingsDialog();}
     if(event.type==='challenge-result'){persist();renderPanel();updateHUD();challengeResult();}
   }
-  scene.draw(state,delta,manualPause||document.hidden||dialog.open||!!state.expedition.pending);
+  honor.remember(scoreFromGame(state));
+  scene.draw(state,delta,manualPause||document.hidden||dialog.open||honor.isOpen()||!!state.expedition.pending);
   const rewardCount=availableRewards(state);
   if(rewardCount!==lastRewardCount){lastRewardCount=rewardCount;if(selectedTab==='pets')renderPanel();}
   hudElapsed+=delta;saveElapsed+=delta;

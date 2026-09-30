@@ -1,11 +1,14 @@
 {
   "name": "miaofire",
-  "version": "1.6.1",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "honor:dev": "node backend/honor/dev-server.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=22.13"
+  }
 }
