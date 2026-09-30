@@ -2,13 +2,13 @@ import {encounterFor} from './enemies.mjs';
 import {blessingCount} from './blessings.mjs';
 export const BOSS_CYCLE=5, BOSS_WINDUP=2, SHIELD_DELAY=3, SHIELD_REGEN=8;
 export function shieldRecovery(s){return s.dailyRule==='drought'?0:s.level<3?SHIELD_REGEN:4;}
-export function defenseStats(s){return {maxHp:100+20*s.upgrades.health,maxShield:60+15*s.upgrades.shield+15*blessingCount({...s,challenge:null},'barrier')};}
+export function defenseStats(s){if(s.challenge?.run)return defenseStats(s.challenge.run);return {maxHp:100+20*s.upgrades.health,maxShield:60+15*s.upgrades.shield+15*blessingCount({...s,challenge:null},'barrier')};}
 export function resetSurvival(s){const d=defenseStats(s);s.survival={hp:d.maxHp,shield:d.maxShield,bossTime:0,enemyStrikes:0,damageAgo:SHIELD_DELAY,attackCount:0};s.failureReason=null;}
 // Retain bossTime in v3 saves; it now tracks the current enemy's attack clock.
 export function resetEnemyAttack(s){s.survival.bossTime=0;s.survival.enemyStrikes=0;}
 export function bossDamage(level){return 40+8*Math.max(0,Math.floor(level/5)-1);}
 export function enemyAttack(s){
- if(s.challenge?.kind==='daily')return enemyAttack(s.challenge.run);
+ if(s.challenge?.run)return enemyAttack(s.challenge.run);
  if(s.challenge)return null;
  const enemy=encounterFor(s),boss=enemy.kind==='boss',enraged=boss&&s.hp<=enemy.hp*.5;
  const regularDamage=s.level<3?4:6+Math.floor((s.level-3)*.9);
@@ -16,12 +16,12 @@ export function enemyAttack(s){
  return {enemy,boss,enraged,cycle:boss?(s.survival.enemyStrikes?BOSS_CYCLE:3):s.survival.enemyStrikes?repeat:1,windup:boss?BOSS_WINDUP:1,
   damage:boss?Math.ceil(bossDamage(s.level)*(enraged?1.4:1)):Math.ceil((regularDamage+(enemy.kind==='armored'?6:0))*(enemy.elite==='fury'?1.3:1))};
 }
-export function enemyCharging(s){if(s.challenge?.kind==='daily')return enemyCharging(s.challenge.run);const a=enemyAttack(s);return !!a&&s.status==='playing'&&s.survival.bossTime>=a.cycle-a.windup-1e-8;}
+export function enemyCharging(s){if(s.challenge?.run)return enemyCharging(s.challenge.run);const a=enemyAttack(s);return !!a&&s.status==='playing'&&!s.endlessRun?.pending&&s.survival.bossTime>=a.cycle-a.windup-1e-8;}
 export function bossCharging(s){return enemyAttack(s)?.boss===true&&enemyCharging(s);}
 
 // Called only after friendly shots; a defeated enemy never lands a pending strike.
 export function advanceSurvival(s,dt){
- if(s.challenge||s.status!=='playing')return [];
+ if(s.challenge||s.status!=='playing'||s.endlessRun?.pending)return [];
  const v=s.survival,events=[],d=defenseStats(s);
  const recovery=Math.max(0,dt-Math.max(0,SHIELD_DELAY-v.damageAgo));
  v.damageAgo=Math.min(SHIELD_DELAY,v.damageAgo+dt);
@@ -34,7 +34,7 @@ export function advanceSurvival(s,dt){
  const shieldDamage=Math.min(v.shield,damage),healthDamage=Math.min(v.hp,damage-shieldDamage);
  const shieldBroken=v.shield>0&&damage>=v.shield;
  v.shield=Math.max(0,v.shield-shieldDamage);v.hp=Math.max(0,v.hp-healthDamage);
- events.push({type:boss?'boss-strike':'enemy-strike',targetId:`${s.dailyRule?'daily':'tree'}-${s.totalKills}`,enemyKind:enemy.kind,enemyName:enemy.name,damage,shieldDamage,healthDamage,shieldBroken});
+ events.push({type:boss?'boss-strike':'enemy-strike',targetId:`${s.endlessRun?'endless':s.dailyRule?'daily':'tree'}-${s.totalKills}`,enemyKind:enemy.kind,enemyName:enemy.name,damage,shieldDamage,healthDamage,shieldBroken});
  if(v.hp<=1e-8){v.hp=0;s.status='failed';s.failureReason='defeat';s.accumulator=0;events.push({type:'failed',reason:'defeat'});}
  return events;
 }

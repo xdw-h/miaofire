@@ -4,6 +4,8 @@
 
 首次发布通过 Cloudflare 控制台完成，未在本机授权 Wrangler。后续可继续通过控制台更新，或由账号所有者授权官方 CLI 后按下面的流程发布。`RATE_LIMIT_SALT` 已在云端加密保存；不要重复创建数据库或重置它。
 
+1.9.0 升级时，先在现有 D1 执行 schema 中 `CREATE TABLE IF NOT EXISTS endless_scores` 与 `CREATE INDEX IF NOT EXISTS endless_score_order`，再更新 Worker。原 `scores` 表和身份保持不变；`/health` 会检查两张成绩表并返回版本 1.9.0。
+
 ## 部署顺序
 
 在项目根目录执行，使用 Node.js 24 和官方 Wrangler CLI。以下命令使用 PowerShell 7，依次执行；先由账号所有者完成 Cloudflare 登录和必要授权。
@@ -24,6 +26,7 @@
 
 - `GET /leaderboard`：前 100 名；携带 `Authorization: Bearer <64位hex随机令牌>` 时额外返回自己的排名，即使不在前 100 名。
 - `POST /scores`：同一令牌加 JSON `{nickname,stage,waves}`；要求来自允许的 Origin，正文最多 2048 字节。仅更好成绩替换原分数；改名不改变同分先后顺序。
+- `GET /endless-leaderboard` / `POST /endless-scores`：独立生存榜，提交 `{nickname,waves}`，完成波数为 1–99999 的整数；排序为波数降序、首次达到时间升序、公开 UUID 升序。与主线共享浏览器身份和限流，成绩互不影响。数据库在 `endless_scores` 中查看。
 - 身份：浏览器产生 256 位随机令牌，本地保存；数据库只存令牌的 SHA-256 哈希。榜单公开 UUID，不公开身份令牌或哈希。
 - 提交限制：同一网络 IP 每小时最多 30 次有效提交；数据库只存加盐哈希，旧限流记录定期清理。公共网络上的玩家共用此额度。
 - 维护：昵称不代表真实身份；恶意成绩或不当昵称可由管理员在 D1 控制台按公开 UUID 定位处理。删除记录属于管理员操作，需明确确认。自动反作弊、敏感词审核、账号申诉未纳入此版。

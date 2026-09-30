@@ -17,4 +17,9 @@ export function enemyFor(level,kills){
  return {kind,level,...info,...(elite?{elite,name:`${{regen:'再生',fury:'狂暴',barrier:'护盾'}[elite]}${info.name}`,label:traits[elite],coinMultiplier:1.8}:{}),hp:Math.min(1e120,Math.round(baseHealth(level)*(kind==='boss'?4.5:elite?1.15:1)))};
 }
 export function damageToEnemy(damage,enemy){return Math.max(1,Math.floor(damage*(1-enemy.armor)));}
-export function encounterFor(s){return s.dailyRule==='bossrush'?{...enemyFor(5,9),level:s.level,hp:Math.round(baseHealth(s.level)*4.5)}:enemyFor(s.level,s.kills);}
+export function endlessEnemy(waves){
+ const wave=waves+1,boss=wave%5===0;
+ const template=boss?enemyFor(5,9):enemyFor(5,(wave-1)%3===2?3:(wave-1)%2);
+ return {...template,level:wave+4,coinMultiplier:0,hp:Math.min(1e120,Math.round(240*1.14**waves*(boss?2.4:1)))};
+}
+export function encounterFor(s){return s.endlessRun?endlessEnemy(s.endlessRun.waves):s.dailyRule==='bossrush'?{...enemyFor(5,9),level:s.level,hp:Math.round(baseHealth(s.level)*4.5)}:enemyFor(s.level,s.kills);}

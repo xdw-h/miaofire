@@ -8,6 +8,8 @@ export {chooseBlessing} from './blessings.mjs';
 import {activeLinks,combatDefaults,clearLinks,syncEncounter,tickCombat,linkShot} from './combat-effects.mjs';
 import {SKILLS,skillDefaults,tickSkills} from './skills.mjs';
 import {dailyDefaults,dailyInfo,dailyAvailable,DAILY_RULES} from './daily.mjs';
+import {endlessDefaults,recordEndless} from './endless.mjs';
+export {chooseEndless} from './endless.mjs';
 export {TYPES} from './weapons.mjs';
 export {defenseStats} from './survival.mjs';
 export const TIERS = ['C', 'B', 'A', 'S', 'SS'];
@@ -29,6 +31,7 @@ export function createGame() {
   const s = {
     ...progressionDefaults(),
     daily:dailyDefaults(),
+    endless:endlessDefaults(),
     expedition:expeditionDefaults(),combat:combatDefaults(),skills:skillDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
     upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0},
@@ -43,12 +46,12 @@ export function createGame() {
 export function weaponPower(s, weapon) {
   const type = TYPES[weapon.type];
   const bonus=petBonus(s);
-  const damage = Math.round(type.damage * 1.85 ** weapon.tier * 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*bonus.attack*(1+.08*blessingCount(s,'attack')));
-  const rate = type.rate * (1 + s.upgrades.speed * 0.07)*bonus.speed*(1+.05*blessingCount(s,'speed'))*(s.equipment.includes(weapon.id)&&['pistol','smg'].includes(weapon.type)&&activeLinks(s).some(l=>l.id==='rapid')?1.08:1);
+  const damage = Math.round(type.damage * 1.85 ** weapon.tier * 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*bonus.attack*(1+.08*blessingCount(s,'attack'))*(1+.25*(s.endlessRun?.power??0)));
+  const rate = type.rate * (1 + s.upgrades.speed * 0.07)*bonus.speed*(1+.05*blessingCount(s,'speed'))*(s.equipment.includes(weapon.id)&&['pistol','smg'].includes(weapon.type)&&activeLinks(s).some(l=>l.id==='rapid')?1.08:1)*(1+.15*(s.endlessRun?.tempo??0));
   return {damage, rate, dps: damage * rate};
 }
 export function stats(s) {
-  if(s.challenge?.kind==='daily')return stats(s.challenge.run);
+  if(s.challenge?.run)return stats(s.challenge.run);
   const cats = s.equipment.map(id => {
     const weapon = s.inventory.find(w => w.id === id);
     return weapon ? {...weapon, ...weaponPower(s, weapon)} : null;
@@ -158,7 +161,17 @@ export function startChallenge(s,tier){
   s.challenge={tier,hp:CHALLENGES[tier].hp,elapsed:0,cooldowns:[0,0,0],accumulator:0,status:'playing',reward:0,combat:combatDefaults(),skills:skillDefaults()};
   return ok(`开始${CHALLENGES[tier].name}，限时 30 秒`);
 }
-export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');s.challenge=null;return ok('已返回主线，继续之前的冒险');}
+export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');recordEndless(s);s.challenge=null;return ok('已返回主线，继续之前的冒险');}
+export function startEndless(s){
+  if(s.challenge)return fail('已有挑战进行中');
+  if(s.expedition?.pending)return fail('请先选择远征祝福');
+  if(s.bestEver<5)return fail('通过第 5 关后开放无尽守卫');
+  const run=createGame();run.level=5;run.endlessRun={waves:0,pending:false};
+  run.inventory=['pistol','crossbow','sniper'].map((type,i)=>({id:`w${i+1}`,type,tier:1}));run.equipment=run.inventory.map(w=>w.id);run.nextId=4;
+  run.upgrades={attack:3,speed:2,income:0,health:3,shield:3};restartBattle(run);run.hp=targetHealth(run);
+  s.endless??=endlessDefaults();s.challenge={kind:'endless',run,status:'playing'};
+  return ok('开始无尽守卫，每波限时 60 秒');
+}
 export function startDaily(s,date=new Date()){
   if(s.challenge)return fail('已有挑战进行中');
   if(s.expedition.pending)return fail('请先选择远征祝福');
@@ -170,14 +183,14 @@ export function startDaily(s,date=new Date()){
   s.challenge={kind:'daily',date:info.date,rule:info.rule,target:info.target,run,status:'playing',reward:0,gemsReward:0};
   return ok(`开始每日挑战：${info.name}`);
 }
-export function targetId(s){return s.challenge?.kind==='daily'?targetId(s.challenge.run):s.challenge?`challenge-${s.challenge.tier}`:`${s.dailyRule?'daily':'tree'}-${s.totalKills}`;}
-export function battleState(s){return s.challenge?.kind==='daily'?s.challenge.run:s.challenge||s;}
-export function currentEnemy(s){return s.challenge?.kind==='daily'?currentEnemy(s.challenge.run):s.challenge?{kind:'dummy',name:'训练木偶',label:'精英目标',level:s.level,armor:0,coinMultiplier:0,hp:CHALLENGES[s.challenge.tier].hp}:encounterFor(s);}
+export function targetId(s){return s.challenge?.run?targetId(s.challenge.run):s.challenge?`challenge-${s.challenge.tier}`:`${s.endlessRun?'endless':s.dailyRule?'daily':'tree'}-${s.totalKills}`;}
+export function battleState(s){return s.challenge?.run?s.challenge.run:s.challenge||s;}
+export function currentEnemy(s){return s.challenge?.run?currentEnemy(s.challenge.run):s.challenge?{kind:'dummy',name:'训练木偶',label:'精英目标',level:s.level,armor:0,coinMultiplier:0,hp:CHALLENGES[s.challenge.tier].hp}:encounterFor(s);}
 export function targetHealth(s){return currentEnemy(s).hp;}
 export function castSkill(s,id){
-  if(s.challenge?.kind==='daily')return castSkill(s.challenge.run,id);
+  if(s.challenge?.run)return castSkill(s.challenge.run,id);
   const b=battleState(s),skill=SKILLS[id];
-  if(!Object.hasOwn(SKILLS,id)||b.status!=='playing'||!s.challenge&&s.expedition?.pending)return fail('当前无法释放技能');
+  if(!Object.hasOwn(SKILLS,id)||b.status!=='playing'||b.endlessRun?.pending||!s.challenge&&s.expedition?.pending)return fail('当前无法释放技能');
   if(b.skills.cooldowns[id]>1e-8)return fail('技能正在冷却');
   if(id!=='burst'&&s.challenge)return fail('训练木偶不反击，无需恢复防线');
   const d=defenseStats(s),v=s.survival;
@@ -190,6 +203,12 @@ export function castSkill(s,id){
 
 // Fixed simulation steps make gameplay identical on 30/60/120 Hz displays.
 export function advance(s, delta) {
+  if(s.challenge?.kind==='endless'){
+    const ch=s.challenge;if(ch.status!=='playing')return [];
+    const events=advance(ch.run,delta);ch.status=ch.run.status;recordEndless(s);
+    if(ch.status==='failed')events.push({type:'challenge-result',won:false,reward:0,waves:ch.run.endlessRun.waves,reason:ch.run.failureReason});
+    return events;
+  }
   if(s.challenge?.kind==='daily'){
     const ch=s.challenge;if(ch.status!=='playing')return [];
     const events=advance(ch.run,delta);ch.status=ch.run.status;
@@ -201,7 +220,7 @@ export function advance(s, delta) {
   }
   const events = [];
   const battle=battleState(s),limit=s.challenge?30:60;
-  if (battle.status !== 'playing' || !s.challenge&&s.expedition?.pending || !Number.isFinite(delta) || delta <= 0) return events;
+  if (battle.status !== 'playing' || battle.endlessRun?.pending || !s.challenge&&s.expedition?.pending || !Number.isFinite(delta) || delta <= 0) return events;
   battle.accumulator += Math.min(delta, 0.25);
   const current = stats(s);
   while (battle.accumulator + 1e-9 >= STEP && battle.status === 'playing') {
@@ -250,6 +269,15 @@ export function advance(s, delta) {
         if(finished){s.status='won';s.accumulator=0;break;}
         s.hp=targetHealth(s);resetEnemyAttack(s);syncEncounter(s,targetId(s),currentEnemy(s));continue;
       }
+      if(s.endlessRun){
+        s.endlessRun.waves++;s.kills++;s.totalKills++;s.level++;s.elapsed=0;
+        s.endlessRun.pending=s.endlessRun.waves%5===0;
+        events.push({type:'kill',coins:0,targetId:id,nextTargetId:targetId(s),nextLevel:s.level,nextEnemy:currentEnemy(s),enemyKind:enemy.kind});
+        events.push({type:'endless-wave',waves:s.endlessRun.waves});
+        s.hp=targetHealth(s);resetEnemyAttack(s);syncEncounter(s,targetId(s),currentEnemy(s));
+        if(s.endlessRun.pending){s.accumulator=0;events.push({type:'endless-choice',waves:s.endlessRun.waves});break;}
+        continue;
+      }
       const coins = Math.round((4 + Math.floor(s.level * 1.6)) * current.income*enemy.coinMultiplier);
       s.coins = bounded(s.coins + coins); s.kills++; s.totalKills++;
       s.survival.shield=Math.min(defenseStats(s).maxShield,s.survival.shield+6*blessingCount(s,'harvest'));
@@ -268,7 +296,7 @@ export function advance(s, delta) {
       syncEncounter(s,targetId(s),currentEnemy(s));
       if(s.expedition.pending)break;
     }
-    if(!s.challenge&&s.expedition.pending)break;
+    if(!s.challenge&&(s.expedition.pending||s.endlessRun?.pending))break;
     if(!s.challenge&&s.status==='playing')events.push(...advanceSurvival(s,STEP));
   }
   return events;

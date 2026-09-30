@@ -18,7 +18,10 @@ import {dailyPanel,linksGuide,DAILY_RULES} from './expedition-ui.mjs';
 import {dailyAvailable,localDate} from './daily.mjs';
 import {createHonorBoard} from './honor-ui.mjs';
 import {scoreFromGame} from './leaderboard-rules.mjs';
-const actor=()=>state.challenge?.kind==='daily'?state.challenge.run:state;
+import {startEndless,chooseEndless} from './game.mjs';
+import {endlessPanel,endlessChoices} from './endless-ui.mjs';
+const actor=()=>state.challenge?.run||state;
+const endlessPending=()=>!!actor().endlessRun?.pending;
 
 let storage;
 try { storage = window.localStorage; } catch { storage = {getItem(){throw Error('Unavailable');},setItem(){throw Error('Unavailable');}}; }
@@ -101,7 +104,7 @@ scene.onCoins=()=>{
   }
 };
 const dialog = $('#dialog');
-const honor=createHonorBoard({storage,getScore:()=>scoreFromGame(state),onOpen:closeDialog,onClose:updateHUD});
+const honor=createHonorBoard({storage,getScore:()=>scoreFromGame(state),getEndlessScore:()=>({waves:state.endless.bestWaves}),onOpen:closeDialog,onClose:updateHUD});
 const gameAudio = new GameAudio(undefined,()=>syncSound());
 function notify(message, error=false) {
   const el = document.createElement('div'); el.className=`toast${error?' error':''}`; el.textContent=message;
@@ -179,14 +182,14 @@ function renderPanel() {
   } else if(selectedTab==='pets'){
     $('#panel-body').innerHTML=petsPanel(state);
   } else if(selectedTab==='challenges'){
-    $('#panel-body').innerHTML=dailyPanel(state)+challengesPanel(state);
+    $('#panel-body').innerHTML=endlessPanel(state)+dailyPanel(state)+challengesPanel(state);
   } else {
     $('#panel-body').innerHTML=`<div class="rebirth-card"><div class="rebirth-orb">${icon('crystal')}</div><h3>新的起点，更强的你</h3><p>把这趟旅途化成紫晶，<br>带着永久的力量再次出发。</p><div class="rebirth-stats"><div><strong id="rebirth-reward">+${rebirthReward(state)}</strong><span>本次可得紫晶</span></div><div><strong>+${decimal(state.crystals*10)}%</strong><span>现有永久攻击加成</span></div></div><button class="primary-button wide" data-action="rebirth" id="rebirth-button">${icon('refresh')}开始转生</button><div class="rebirth-note"><b>保留</b> 武器、装备、钻石、紫晶、伙伴和鱼干<br><b>重置</b> 金币、金币升级、当前关卡和远征祝福<br>每通过 3 关获得 1 颗紫晶，每颗永久增加 10% 基础攻击力。</div></div>`;
   }
   updateButtons();
   if(state.challenge){
     $('#panel-body').insertAdjacentHTML('afterbegin','<div class="panel-lock">挑战中，装备与养成暂时锁定</div>');
-    $('#panel-body').querySelectorAll('button').forEach(b=>b.disabled=true);
+    $('#panel-body').querySelectorAll('button').forEach(b=>{if(!['endless-choice','endless-honor','challenge-exit','challenge-result'].includes(b.dataset.action))b.disabled=true;});
   }
 }
 function mergePartner(w) {return state.inventory.find(other=>other.id!==w.id&&other.type===w.type&&other.tier===w.tier&&!state.equipment.includes(other.id));}
@@ -217,43 +220,45 @@ function updateHUD() {
   $('#coins').textContent=money(state.coins);$('#gems').textContent=money(state.gems);$('#crystals').textContent=money(state.crystals);
   $('#fish').textContent=money(state.fish);
   if(selectedTab==='pets')for(const m of MILESTONES){const el=$(`[data-milestone-progress="${m.id}"]`);if(el)el.textContent=`${Math.min(m.target,state[m.field])} / ${m.target} · 奖励 ${m.reward} 鱼干`;}
-  $('#companion-label').textContent=state.challenge?.kind==='daily'?'每日试用小队 · 不带入伙伴加成':companionLabel(state);
+  $('#companion-label').textContent=state.challenge?.run?'固定试用小队 · 不带入伙伴加成':companionLabel(state);
   const rewards=availableRewards(state);$('#pet-notification').textContent=rewards?`${rewards} 可领取`:'';
   $('#tab-pets').classList.toggle('has-rewards',rewards>0);
-  const challenge=state.challenge,battle=battleState(state),enemy=currentEnemy(state),reward=stageReward(state.level),daily=challenge?.kind==='daily',a=actor();
+  const challenge=state.challenge,battle=battleState(state),enemy=currentEnemy(state),reward=stageReward(state.level),daily=challenge?.kind==='daily',endless=challenge?.kind==='endless',a=actor();
   updateTactics();
   updateDefenseHUD(enemy);
   $('.scene-wrap').classList.toggle('boss-battle',enemy.kind==='boss');
   $('.tree-label').classList.toggle('armored-target',enemy.kind==='armored');
   $('#enemy-trait').textContent=(enemyAttack(state)?.enraged?'BOSS · 狂暴 +40%':enemy.label)+(enemy.elite==='barrier'?` · 剩余护盾 ${money(battle.combat.target===undefined||battle.combat.target===null?Math.ceil(enemy.hp*.25):battle.combat.enemyShield)}`:'');
   $('#challenge-banner').hidden=!challenge;
-  $('#challenge-banner>span').textContent=daily?'每日挑战中 · 主线已暂停':'补给挑战中 · 主线已暂停';
+  $('#challenge-banner>span').textContent=endless?'无尽守卫中 · 主线已暂停':daily?'每日挑战中 · 主线已暂停':'补给挑战中 · 主线已暂停';
   const chapter=state.level<=3?'初入松林':state.level<=6?'林间深处':state.level<=10?'风语山谷':'无尽林海';
-  $('#stage-title').textContent=daily?`每日 · ${DAILY_RULES[challenge.rule].name}`:challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
-  $('#stage-sub').textContent=daily?`${challenge.date} · 固定试用小队 · 技能可用`:challenge?'集中火力！30 秒内击破训练木偶':enemy.kind==='boss'?'古木守卫现身 · 集中火力拿下丰厚补给':isBossStage(state.level)?'本关第 10 波：古木守卫 BOSS':enemy.kind==='armored'?'松果硬壳抵消 25% 伤害 · 升级火力击破它':`距离 BOSS 关还有 ${5-state.level%5} 关`;
-  const seconds=Math.max(0,Math.ceil((challenge&&!daily?30:60)-battle.elapsed));$('#timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+  $('#stage-title').textContent=endless?`无尽守卫 · 第 ${a.endlessRun.waves+1} 波`:daily?`每日 · ${DAILY_RULES[challenge.rule].name}`:challenge?`补给 ${challenge.tier+1} · ${CHALLENGES[challenge.tier].name}`:`第 ${state.level} 关 · ${chapter}`;
+  $('#stage-sub').textContent=endless?(endlessPending()?'Boss 已击败 · 选择补给后继续':'每 5 波一个 Boss · 血盾不会随换波补满'):daily?`${challenge.date} · 固定试用小队 · 技能可用`:challenge?'集中火力！30 秒内击破训练木偶':enemy.kind==='boss'?'古木守卫现身 · 集中火力拿下丰厚补给':isBossStage(state.level)?'本关第 10 波：古木守卫 BOSS':enemy.kind==='armored'?'松果硬壳抵消 25% 伤害 · 升级火力击破它':`距离 BOSS 关还有 ${5-state.level%5} 关`;
+  const seconds=Math.max(0,Math.ceil((challenge&&!challenge.run?30:60)-battle.elapsed));$('#timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
   $('#timer-wrap').classList.toggle('urgent',seconds<=10);
   const health=targetHealth(state),ratio=battle.hp/health*100;
   $('#health-fill').style.width=`${ratio}%`;$('#health-track').setAttribute('aria-valuenow',Math.round(ratio));
   $('#health-track').setAttribute('aria-label',`${enemy.name}剩余生命`);
   $('#health-number').textContent=`${money(battle.hp)} / ${money(health)}`;
   $('#tree-name').textContent=enemy.name;
-  $('#tree-index').textContent=daily?`${Math.min(challenge.target,battle.kills+1)} / ${challenge.target}`:challenge?'精英目标':enemy.kind==='boss'?'BOSS · 10 / 10':`${state.kills+1} / 10`;
-  $('#progress-label').textContent=daily?`今日进度 · ${battle.kills} / ${challenge.target}`:challenge?`已造成伤害 · ${Math.round(100-ratio)}%`:`本关进度 · ${state.kills} / 10`;
-  $('#stage-reward').textContent=daily?(challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:dailyAvailable(state,challenge.date)?'首胜 +20 钻石 · +40 鱼干':'今日奖励已领取 · 练习中'):challenge?`胜利奖励 +${challenge.status==='won'?challenge.reward:challengeReward(state,challenge.tier)} 鱼干`:`通关 +${reward.gems} 钻石 · +${reward.fish} 鱼干`;
+  $('#tree-index').textContent=endless?(enemy.kind==='boss'?'BOSS 波':`第 ${a.endlessRun.waves+1} 波`):daily?`${Math.min(challenge.target,battle.kills+1)} / ${challenge.target}`:challenge?'精英目标':enemy.kind==='boss'?'BOSS · 10 / 10':`${state.kills+1} / 10`;
+  $('#progress-label').textContent=endless?`本局已守住 ${a.endlessRun.waves} 波`:daily?`今日进度 · ${battle.kills} / ${challenge.target}`:challenge?`已造成伤害 · ${Math.round(100-ratio)}%`:`本关进度 · ${state.kills} / 10`;
+  $('#stage-reward').textContent=endless?`历史最佳 ${state.endless.bestWaves} 波`:daily?(challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:dailyAvailable(state,challenge.date)?'首胜 +20 钻石 · +40 鱼干':'今日奖励已领取 · 练习中'):challenge?`胜利奖励 +${challenge.status==='won'?challenge.reward:challengeReward(state,challenge.tier)} 鱼干`:`通关 +${reward.gems} 钻石 · +${reward.fish} 鱼干`;
   $('#stage-path').hidden=!!challenge;
   document.querySelectorAll('.path-stop').forEach((el,i)=>{el.classList.toggle('done',i<state.kills);el.classList.toggle('current',i===state.kills);el.classList.toggle('boss-stop',!challenge&&isBossStage(state.level)&&i===9);});
   const powers=stats(state);$('#dps').textContent=decimal(powers.dps);$('#total-kills').textContent=money(state.totalKills);$('#best').textContent=state.bestEver;
   $('#squad-count').textContent=`${a.equipment.filter(Boolean).length} / ${daily&&challenge.rule==='duo'?2:3} ${daily?'试用出战':'出战'}`;
   $('#no-cats').hidden=a.equipment.some(Boolean);
   const failed=battle.status==='failed'||battle.status==='won';
-  $('#battle-overlay').hidden=!failed&&!manualPause;
+  $('#battle-overlay').hidden=!failed&&!manualPause&&!endlessPending();
   $('#honor-end').hidden=!failed||!!challenge;
   if(failed&&daily){$('#overlay-title').textContent=challenge.status==='won'?'每日挑战完成':'每日挑战结束';$('#overlay-copy').textContent=challenge.status==='won'?`本次 +${challenge.gemsReward} 钻石 · +${challenge.reward} 鱼干`:'尝试在敌人重击前补盾，保留爆发应对 Boss。';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').textContent='查看结算';}
   else if(failed&&challenge){$('#overlay-title').textContent=challenge.status==='won'?'补给挑战成功！':'木偶还站着，再变强一点';$('#overlay-copy').textContent=challenge.status==='won'?`已获得 ${challenge.reward} 鱼干，奖励已保存`:'本次未获得奖励，返回主线升级火力后再来';$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').innerHTML=`查看结算 ${icon('arrow')}`;}
   else if(failed){$('#overlay-title').textContent=state.failureReason==='defeat'?'小队生命耗尽':enemy.kind==='boss'?'古木守卫挡住了去路':'这个对手有点顽强';$('#overlay-copy').textContent=state.failureReason==='defeat'?'已获得的资源会保留。强化生命和护盾，再满状态挑战本关！':'时间用尽。已获得的资源会保留，升级火力后再来一次！';$('#overlay-action').dataset.action='retry';$('#overlay-action').innerHTML=`再试一次 ${icon('refresh')}`;}
   else {$('#overlay-title').textContent='猫咪休息中';$('#overlay-copy').textContent='伸个懒腰，冒险等你回来。';$('#overlay-action').dataset.action='resume';$('#overlay-action').innerHTML=`继续冒险 ${icon('play')}`;}
-  $('#live-label').textContent=failed?'等待再次出发':state.expedition.pending?'等待选择祝福':manualPause||dialog.open||honor.isOpen()?'猫咪休息中':'自动战斗中';
+  if(endlessPending()){$('#overlay-title').textContent='Boss 已击败，补给抵达';$('#overlay-copy').textContent=`已守住 ${a.endlessRun.waves} 波，选择强化或维修后继续。`;$('#overlay-action').dataset.action='endless-choice';$('#overlay-action').textContent='选择补给';}
+  if(endless&&failed){$('#overlay-title').textContent='守卫结束';$('#overlay-copy').textContent=`本局完成 ${a.endlessRun.waves} 波 · 最佳 ${state.endless.bestWaves} 波`;$('#overlay-action').dataset.action='challenge-result';$('#overlay-action').textContent='结算 · 留名上榜';}
+  $('#live-label').textContent=failed?'等待再次出发':endlessPending()?'等待选择补给':state.expedition.pending?'等待选择祝福':manualPause||dialog.open||honor.isOpen()?'猫咪休息中':'自动战斗中';
   const toggle=$('#pause-toggle');toggle.setAttribute('aria-label',manualPause?'继续战斗':'暂停战斗');toggle.setAttribute('aria-pressed',String(manualPause));
   toggle.innerHTML=icon(manualPause?'play':'pause');updateButtons();
 }
@@ -268,8 +273,8 @@ function syncSound(){
 function updateDefenseHUD(enemy){
   $('#blessing-summary').textContent=state.expedition.pending?'待选择 · 战斗已暂停':`${state.expedition.choices.length} 层祝福 · 查看效果`;
   $('.blessing-strip').classList.toggle('pending',!!state.expedition.pending);
-  const a=actor(),material=!!state.challenge&&state.challenge.kind!=='daily',v=a.survival,d=defenseStats(a),attack=enemyAttack(state),charging=enemyCharging(state),active=!!attack&&a.status==='playing';
-  $('#difficulty-label').textContent=state.challenge?.kind==='daily'?'试用小队防线':`小队防线 · ${difficultyLabel(state.level)}`;
+  const a=actor(),material=!!state.challenge&&!state.challenge.run,v=a.survival,d=defenseStats(a),attack=enemyAttack(state),charging=enemyCharging(state),active=!!attack&&a.status==='playing'&&!endlessPending();
+  $('#difficulty-label').textContent=state.challenge?.run?'试用小队防线':`小队防线 · ${difficultyLabel(state.level)}`;
   for(const [key,value,max]of [['hp',v.hp,d.maxHp],['shield',v.shield,d.maxShield]]){
     $(`#team-${key}`).textContent=`${decimal(value)} / ${max}`;
     $(`#team-${key}-fill`).style.width=`${value/max*100}%`;$(`#team-${key}-track`).setAttribute('aria-valuenow',Math.round(value/max*100));
@@ -280,9 +285,10 @@ function updateDefenseHUD(enemy){
   $('#charge-track').hidden=!active;$('#charge-fill').style.width=`${attack?v.bossTime/attack.cycle*100:0}%`;
   $('#boss-warning-title').textContent=material?'训练木偶不会反击':a.status==='failed'?a.failureReason==='defeat'?'防线失守 · 强化后再挑战':'本关时间用尽':attack?.enraged?`狂暴！${charging?'重击蓄力中':'攻击 +40%'}`:charging?`${enemy.name}蓄力中！`:`${enemy.name}正在准备攻击`;
   $('#boss-warning-copy').textContent=active?`${Math.max(0,attack.cycle-v.bossTime).toFixed(1)} 秒后${attack.boss?'重击':'反击'} · ${attack.damage} 点伤害`:material?'返回主线后继续之前的生命、护盾和蓄力进度':'重试恢复生命和护盾，回到本关第一波';
-  if(state.challenge?.kind==='daily'&&a.status!=='playing'){
+  if(endlessPending()){$('#shield-status').textContent='补给选择中 · 防线已暂停';$('#boss-warning-title').textContent='Boss 已击败';$('#boss-warning-copy').textContent='选择补给后继续；当前生命和护盾将保留';}
+  if(state.challenge?.run&&a.status!=='playing'){
     $('#shield-status').textContent='挑战已结束 · 防线停止计时';
-    $('#boss-warning-title').textContent=a.status==='won'?'每日挑战完成':'每日挑战结束';
+    $('#boss-warning-title').textContent=a.status==='won'?'挑战完成':'挑战结束';
     $('#boss-warning-copy').textContent='查看结算，返回主线或再次挑战';
   }
 }
@@ -290,8 +296,8 @@ function updateTactics(){
  const a=actor(),b=battleState(state),links=activeLinks(a),c=b.combat;
  $('#tactic-strip').textContent=links.length?links.map(l=>l.name).join(' · ')+(c.markTime>0?` · 标记 ${c.markTime.toFixed(1)}秒`:'')+(c.charge?` · 蓄能 ${c.charge}/3`:''):'武器联动 · 查看三种搭配';
  for(const [id,k]of Object.entries(SKILLS)){
-  const el=$(`#skill-${id}`),cd=b.skills.cooldowns[id],material=!!state.challenge&&state.challenge.kind!=='daily',full=id==='shield'?a.survival.shield>=defenseStats(a).maxShield:id==='heal'?a.survival.hp>=defenseStats(a).maxHp:false;
-  el.disabled=manualPause||dialog.open||honor.isOpen()||document.hidden||b.status!=='playing'||!!state.expedition.pending||cd>1e-8||id!=='burst'&&(material||full);
+  const el=$(`#skill-${id}`),cd=b.skills.cooldowns[id],material=!!state.challenge&&!state.challenge.run,full=id==='shield'?a.survival.shield>=defenseStats(a).maxShield:id==='heal'?a.survival.hp>=defenseStats(a).maxHp:false;
+  el.disabled=manualPause||dialog.open||honor.isOpen()||document.hidden||b.status!=='playing'||!!state.expedition.pending||endlessPending()||cd>1e-8||id!=='burst'&&(material||full);
   el.querySelector('small').textContent=id==='burst'&&b.skills.burst>0?`生效 ${b.skills.burst.toFixed(1)}秒`:cd>0?`冷却 ${Math.ceil(cd)}秒`:id!=='burst'&&material?'木偶无需恢复':full?'已满':'点击释放';
   el.classList.toggle('active',id==='burst'&&b.skills.burst>0);
  }
@@ -309,7 +315,7 @@ function guide() {
   showDialog('猫咪小队，新手出发',`<div class="guide-step"><span>01</span><div><b>自动开火，轻松赚金币</b><p>每关 60 秒，击败 10 个敌人前进。小怪登场 1 秒后反击，之后间隔从 4 秒逐步缩短至 3 秒，提前 1 秒预警。Boss 首击 3 秒、之后每 5 秒重击，提前 2 秒预警；半血后狂暴，伤害 +40%；伤害先扣护盾再扣生命。3 秒未受击后开始回盾，前两关每秒 8 点，第 3 关起每秒 4 点；生命耗尽失败，可强化后满状态重试。第 3 关开始出现减伤 25% 的护甲怪；每 5 关的最后一波为4.5 倍生命的古木守卫，通关共得 20 钻石和 10 鱼干。</p></div></div><div class="guide-step"><span>02</span><div><b>抽取武器，集结三只猫</b><p>开局赠送 30 钻石，通关再得 10 钻石。随机补给每次 10 钻石，七种武器等概率；图鉴内可花 20 钻石定向领取。记得装备新武器。狙击克制 Boss，穿甲弩无视护甲，火箭收割残血，护盾枪开火补盾。</p></div></div><div class="guide-step"><span>03</span><div><b>同款合成，让火力进化</b><p>两把未装备、同类型同等级的武器，合成一把更高等级的随机武器。最高 SS 级。</p></div></div><div class="guide-step"><span>04</span><div><b>转生，带着力量重新开始</b><p>通过第 3 关后开放。紫晶永久提升攻击力，武器、钻石、伙伴和鱼干保留。</p></div></div><div class="guide-step"><span>05</span><div><b>喂养伙伴，挑战鱼干补给</b><p>第 1、3、5 关分别解锁一位伙伴，可喂养至 20 级。领取成长足迹奖励，第 3 关后挑战木偶，持续收集鱼干。</p></div></div><div class="guide-step"><span>06</span><div><b>选祝福、配联动、迎战精英</b><p>每过 3 关暂停三选一，祝福叠加到转生。弩＋狙击标记增伤；护盾枪＋火箭积累蓄能；手枪＋冲锋枪加射速。第 4 关起出现再生、狂暴和护盾精英，留意名字、光环及特性。</p></div></div><div class="guide-step"><span>07</span><div><b>手动技能与每日试炼</b><p>防线下方点击补盾、爆发和急救，冷却分别为 18、22、25 秒。急救不消耗鱼干。通过第 3 关后，在挑战页体验固定试用小队的每日规则，首胜获得 20 钻石和 40 鱼干。同日重复仅练习，主线进度会保留。</p></div></div><button class="primary-button wide" data-modal="done">明白了，出发！ ${icon('arrow')}</button><p class="muted-copy">进度保存在当前浏览器。离开页面时暂停战斗；回来刷新后，从当前关卡起点继续。</p>`,()=>closeDialog());
 }
 function settings() {
-  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>重置游戏养成进度，重新领取初始补给。荣誉榜最佳记录保留。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 森林远征版 1.8.0<br>森林很大，慢慢来。</p>`,action=>{
+  showDialog('冒险设置',`${audioSettings()}<div class="settings-row"><div><b>本地存档</b><p>${saveBlocked?'原存档读取失败，当前为临时试玩。':saveFailed?'当前浏览器无法保存进度。':'自动保存。刷新后从当前关卡起点继续。'}<br>仅此浏览器、此访问地址有效。</p></div></div><div class="settings-row"><div><b>重新开始</b><p>重置游戏养成进度，重新领取初始补给。荣誉榜最佳记录保留。</p></div><button class="secondary-button danger" data-modal="reset">重开游戏</button></div><p class="muted-copy">喵火前线 · 无尽守卫版 1.9.0<br>森林很大，慢慢来。</p>`,action=>{
     if(action==='sound')toggleSound();
     if(action==='sound-test'){if(gameAudio.enabled)gameAudio.play('test');else void gameAudio.enable();}
     if(action==='reset')confirmReset();
@@ -322,6 +328,21 @@ function confirmReset() {
   });
 }
 
+function beginEndless(){
+ const result=startEndless(state);if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}actionResult(result);
+}
+function endlessChoiceDialog(){
+ if(!endlessPending())return;
+ showDialog('守卫补给 · 三选一',endlessChoices(state),(action,button)=>{
+  if(action!=='endless-pick')return;const result=chooseEndless(state,button.dataset.id);
+  if(result.ok)closeDialog();actionResult(result);
+ });
+}
+function endlessResult(ch){
+ const waves=ch.run.endlessRun.waves,reason=ch.run.status==='playing'?'主动结束守卫':ch.run.failureReason==='timeout'?'本波时间用尽':'小队防线失守';
+ leaveChallenge();honor.rememberEndless({waves:state.endless.bestWaves});
+ showDialog('无尽守卫 · 本局结算',`<div class="challenge-result"><p>${reason}</p><h3>守住 ${waves} 波</h3><p>历史最佳 ${state.endless.bestWaves} 波，已保存。<br>固定小队重新出发，试试不同补给与技能时机。</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="secondary-button" data-modal="retry">再次守卫</button><button class="primary-button" data-modal="honor">留下名字 · 生存榜</button></div>`,choice=>{closeDialog();if(choice==='retry')beginEndless();if(choice==='honor'){honor.open('endless');updateHUD();}});
+}
 function beginDaily(date=new Date()){
  const result=startDaily(state,date);if(result.ok){manualPause=false;scene.resetEffects();clearDefenseFeedback();setTab('challenges');}actionResult(result);
 }
@@ -335,6 +356,7 @@ function leaveChallenge(){
 }
 function challengeResult(){
   const ch=state.challenge;if(!ch||ch.status==='playing')return;
+  if(ch.kind==='endless'){endlessResult(ch);return;}
   if(ch.kind==='daily'){
    showDialog(ch.status==='won'?'每日挑战完成':'防线失守，再试一次',`<div class="challenge-result"><h3>${DAILY_RULES[ch.rule].name}</h3><p>${ch.date} · 击败 ${ch.run.kills} / ${ch.target}</p><h3>+${ch.gemsReward} 钻石 · +${ch.reward} 鱼干</h3><p>${ch.status==='won'?(ch.reward?'首胜奖励已保存。':'该日期奖励已领取，本次为练习。'):'本次未获得奖励。试用小队不变，留意技能释放时机。'}</p></div><div class="dialog-buttons"><button class="secondary-button" data-modal="leave">返回主线</button><button class="primary-button" data-modal="retry">再次挑战</button></div>`,choice=>{closeDialog();leaveChallenge();if(choice==='retry')beginDaily(new Date(ch.date+'T12:00:00'));});return;
   }
@@ -358,6 +380,9 @@ document.addEventListener('click',event=>{
   if(action==='links')showDialog('三只猫，组合更强',linksGuide());
   if(action==='skill'&&!manualPause&&!dialog.open&&!honor.isOpen()&&!document.hidden)actionResult(castSkill(state,id));
   if(action==='daily-start')beginDaily();
+  if(action==='endless-start')beginEndless();
+  if(action==='endless-choice')endlessChoiceDialog();
+  if(action==='endless-honor'){honor.open('endless');updateHUD();}
   if(action==='blessings')blessingsDialog();
   if(action==='settings')settings();
   if(action==='close-dialog')closeDialog();
@@ -368,7 +393,7 @@ document.addEventListener('click',event=>{
   if(action==='challenge-start')beginChallenge(Number(button.dataset.tier));
   if(action==='challenge-exit'){
     if(state.challenge?.status!=='playing')leaveChallenge();
-    else showDialog('返回主线？','<p>本次挑战尚未完成，退出不会获得鱼干。主线将从进入挑战前的状态继续。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="stay">继续挑战</button><button class="primary-button" data-modal="leave">退出并返回</button></div>',choice=>{closeDialog();if(choice==='leave')leaveChallenge();});
+    else showDialog('返回主线？',`<p>${state.challenge?.kind==='endless'?'结束本局并保留已完成波数，可在结算中留名上榜。':'本次挑战尚未完成，退出不会获得鱼干。'}主线将从进入挑战前的状态继续。</p><div class="dialog-buttons"><button class="secondary-button" data-modal="stay">继续挑战</button><button class="primary-button" data-modal="leave">退出并返回</button></div>`,choice=>{closeDialog();if(choice==='leave'){if(state.challenge?.kind==='endless')endlessResult(state.challenge);else leaveChallenge();}});
   }
   if(action==='challenge-result')challengeResult();
   if(action==='arsenal')showDialog('森林军械图鉴',arsenalCatalog(state),(choice,button)=>{
@@ -393,7 +418,7 @@ function frame(now) {
   const delta=Math.min(.1,Math.max(0,(now-last)/1000));last=now;
   const today=localDate();if(today!==lastDailyDate){lastDailyDate=today;if(selectedTab==='challenges')renderPanel();}
   gameAudio.setPaused(document.hidden);gameAudio.tick();
-  const paused=manualPause||dialog.open||honor.isOpen()||document.hidden||battleState(state).status!=='playing';
+  const paused=manualPause||dialog.open||honor.isOpen()||document.hidden||endlessPending()||battleState(state).status!=='playing';
   if(!paused)for(const event of advance(state,delta)) {
     scene.event(event);
     if(event.type==='shot')sound('shot',event.gun);
@@ -411,10 +436,12 @@ function frame(now) {
     }
     if(event.type==='failed'){persist();updateHUD();}
     if(event.type==='blessing'){persist();blessingsDialog();}
+    if(event.type==='endless-wave'){persist();honor.rememberEndless({waves:state.endless.bestWaves});if(selectedTab==='challenges')renderPanel();}
+    if(event.type==='endless-choice'){clearDefenseFeedback();endlessChoiceDialog();}
     if(event.type==='challenge-result'){persist();renderPanel();updateHUD();challengeResult();}
   }
   honor.remember(scoreFromGame(state));
-  scene.draw(state,delta,manualPause||document.hidden||dialog.open||honor.isOpen()||!!state.expedition.pending);
+  scene.draw(state,delta,manualPause||document.hidden||dialog.open||honor.isOpen()||!!state.expedition.pending||endlessPending());
   const rewardCount=availableRewards(state);
   if(rewardCount!==lastRewardCount){lastRewardCount=rewardCount;if(selectedTab==='pets')renderPanel();}
   hudElapsed+=delta;saveElapsed+=delta;

@@ -20,7 +20,7 @@ test('pending choices persist without reroll, chosen blessings persist on retry 
 });
 test('legacy v3 backup preserves raw and provides one catch-up blessing',()=>{
  const s=game.createGame();s.level=8;s.bestEver=7;s.bestThisRun=7;s.gems=123;delete s.expedition;const raw=JSON.stringify({version:3,state:s}),db=store();db.setItem(SAVE_KEY,raw);
- const r=loadGame(db);assert.equal(r.blocked,false);assert.equal(db.getItem(SAVE_KEY+'.backup-v3'),raw);assert.equal(r.state.gems,123);assert.equal(r.state.expedition.pending.stage,6);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,4);
+ const r=loadGame(db);assert.equal(r.blocked,false);assert.equal(db.getItem(SAVE_KEY+'.backup-v3'),raw);assert.equal(r.state.gems,123);assert.equal(r.state.expedition.pending.stage,6);assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,5);
 });
 test('all six blessings stack in actual combat and shield capacity',()=>{
  const s=game.createGame();s.level=10;s.bestThisRun=9;s.bestEver=9;s.upgrades.attack=10;s.expedition={milestone:36,pending:null,choices:['attack','attack','speed','speed','harvest','harvest','courage','courage','barrier','barrier','hunter','hunter']};

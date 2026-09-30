@@ -115,16 +115,16 @@ export class ForestScene {
     c.translate(760,g+3);c.scale(1-entry*.1,1-entry*.08);c.translate(-760,-g-3);
     const visualTarget=this.impacts.targetId??targetId(s),attackView=attackPresentation(s,visualTarget);
     if(this.hitFlash>0)c.filter=`brightness(${1+this.hitFlash*.65})`;
-    if(s.challenge&&s.challenge.kind!=='daily')this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t,attackView);
+    if(s.challenge&&!s.challenge.run)this.dummy(760,g+3,t);else this.enemy(760,g+3,this.targetEnemy??=currentEnemy(s),t,attackView);
     c.restore();
-    drawCompanion(c,s.challenge?.kind==='daily'?null:s.activePet,388,g+20,t,this.reduceMotion);
+    drawCompanion(c,(s.challenge?.run||s).activePet,388,g+20,t,this.reduceMotion);
     const cats=stats(s).cats, positions=this.positions();
     for(const i of [2,1,0]) {
       const p=positions[i];
       if(cats[i]) this.cat(p.x,p.y,p.scale,i,cats[i].type,t);
       else this.emptySpot(p.x,p.y,p.scale,i);
     }
-    this.drawDefense(s.challenge?.kind==='daily'?s.challenge.run:s,g,t,attackView);
+    this.drawDefense(s.challenge?.run||s,g,t,attackView);
     for(const p of this.particles) {
       p.life+=dt;const u=Math.min(1,p.life/p.duration);
       c.save();

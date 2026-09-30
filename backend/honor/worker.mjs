@@ -17,6 +17,13 @@ async function readBody(request){
  try{return JSON.parse(new TextDecoder().decode(bytes));}catch{throw{status:400,message:'无法识别提交的战绩'};}
 }
 const fields='public_id AS id,nickname,stage,waves,achieved_at AS achievedAt';
+const endlessFields='public_id AS id,nickname,waves,achieved_at AS achievedAt';
+async function endlessMine(db,hash){
+ if(!hash)return null;
+ const row=await db.prepare(`SELECT ${endlessFields} FROM endless_scores WHERE player_hash=?1`).bind(hash).first();if(!row)return null;
+ const {ahead}=await db.prepare(`SELECT COUNT(*) AS ahead FROM endless_scores WHERE waves>?1 OR (waves=?1 AND achieved_at<?2) OR (waves=?1 AND achieved_at=?2 AND public_id<?3)`).bind(row.waves,row.achievedAt,row.id).first();
+ return{...row,rank:ahead+1};
+}
 async function mine(db,hash){
  if(!hash)return null;
  const row=await db.prepare(`SELECT ${fields} FROM scores WHERE player_hash=?1`).bind(hash).first();if(!row)return null;
@@ -35,12 +42,29 @@ export default {
   const origin=request.headers.get('Origin')||'',allowed=(env.ALLOWED_ORIGINS||'https://xdw-h.github.io').split(',').map(s=>s.trim());
   if(origin&&!allowed.includes(origin))return response({error:'此访问来源未开放'},403);
   const reply=(v,status)=>response(v,status,origin);
-  if(!['/leaderboard','/scores','/health'].includes(new URL(request.url).pathname))return reply({error:'接口不存在'},404);
+  if(!['/leaderboard','/scores','/endless-leaderboard','/endless-scores','/health'].includes(new URL(request.url).pathname))return reply({error:'接口不存在'},404);
   if(request.method==='OPTIONS')return reply(null,204);
   if(!env.DB||typeof env.RATE_LIMIT_SALT!=='string'||env.RATE_LIMIT_SALT.length<32)return reply({error:'荣誉榜暂未就绪，请稍后再试'},503);
   const path=new URL(request.url).pathname;
   try{
-   if(path==='/health'&&request.method==='GET'){await env.DB.prepare('SELECT COUNT(*) AS count FROM scores').bind().first();return reply({ok:true,version:'1.8.0'});}
+   if(path==='/health'&&request.method==='GET'){await env.DB.prepare('SELECT COUNT(*) AS count FROM scores').bind().first();await env.DB.prepare('SELECT COUNT(*) AS count FROM endless_scores').bind().first();return reply({ok:true,version:'1.9.0'});}
+   if(path==='/endless-leaderboard'&&request.method==='GET'){
+    const secret=token(request),hash=secret?await digest(secret):null;
+    const rows=await env.DB.prepare(`SELECT ${endlessFields} FROM endless_scores ORDER BY waves DESC,achieved_at ASC,public_id ASC LIMIT 100`).bind().all();
+    return reply({entries:rows.results.map((r,i)=>({...r,rank:i+1})),mine:await endlessMine(env.DB,hash)});
+   }
+   if(path==='/endless-scores'&&request.method==='POST'){
+    if(!origin)return reply({error:'缺少访问来源'},403);
+    const secret=token(request);if(!secret)return reply({error:'玩家身份无效，请刷新重试'},401);
+    const data=await readBody(request),nickname=cleanNickname(data?.nickname);
+    if(!nickname||!Number.isInteger(data?.waves)||data.waves<1||data.waves>99999)return reply({error:'昵称需为 1–16 个中英文字母、数字、空格或短横线；波数须为 1–99999 的整数'},400);
+    const now=Date.now();await limit(request,env,now);const hash=await digest(secret);
+    await env.DB.prepare(`INSERT INTO endless_scores(player_hash,public_id,nickname,waves,achieved_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)
+     ON CONFLICT(player_hash) DO UPDATE SET nickname=excluded.nickname,
+     achieved_at=CASE WHEN excluded.waves>endless_scores.waves THEN excluded.achieved_at ELSE endless_scores.achieved_at END,
+     waves=MAX(endless_scores.waves,excluded.waves),updated_at=excluded.updated_at`).bind(hash,crypto.randomUUID(),nickname,data.waves,now).run();
+    return reply({ok:true,mine:await endlessMine(env.DB,hash)});
+   }
    if(path==='/leaderboard'&&request.method==='GET'){
     const secret=token(request),hash=secret?await digest(secret):null;
     const rows=await env.DB.prepare(`SELECT ${fields} FROM scores ORDER BY stage DESC,waves DESC,achieved_at ASC,public_id ASC LIMIT 100`).bind().all();

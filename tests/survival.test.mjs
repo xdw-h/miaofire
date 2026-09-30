@@ -51,12 +51,12 @@ test('boss offense and shield recovery agree at 30 and 120 Hz',()=>{
  const a=boss(),b=boss();run(a,20,30);run(b,20,120);assert.deepEqual(a.survival,b.survival);assert.equal(a.status,b.status);
 });
 const store=()=>{const m=new Map();return{getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v)};};
-test('v2 migrates to v4 with an exact backup and keeps trained companions',()=>{
+test('v2 migrates to v5 with an exact backup and keeps trained companions',()=>{
  const db=store(),s=game.createGame();s.coins=123;s.bestEver=5;s.pets.squirrel=2;s.activePet='squirrel';s.fish=79;
  delete s.upgrades.health;delete s.upgrades.shield;delete s.survival;delete s.failureReason;
  const raw=JSON.stringify({version:2,state:s});db.setItem(SAVE_KEY,raw);const r=loadGame(db);
  assert.equal(r.blocked,false);assert.equal(r.migrated,true);assert.equal(db.getItem(`${SAVE_KEY}.backup-v2`),raw);
- assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,4);assert.equal(r.state.coins,123);assert.equal(r.state.fish,79);assert.equal(r.state.pets.squirrel,2);assert.equal(r.state.survival.hp,100);
+ assert.equal(JSON.parse(db.getItem(SAVE_KEY)).version,5);assert.equal(r.state.coins,123);assert.equal(r.state.fish,79);assert.equal(r.state.pets.squirrel,2);assert.equal(r.state.survival.hp,100);
 });
 test('v2 backup failure retains original and blocks autosave',()=>{
  const s=game.createGame(),raw=JSON.stringify({version:2,state:s}),db={getItem:k=>k===SAVE_KEY?raw:null,setItem(){throw Error('full');}};
