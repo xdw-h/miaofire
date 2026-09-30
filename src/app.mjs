@@ -1,5 +1,7 @@
 import {createGame, advance, upgrade, drawWeapon, orderWeapon, equipWeapon, unequipWeapon, mergeWeapons, rebirth, retry, stats, weaponPower, upgradeCost, treeHealth, rebirthReward, TYPES, TIERS, UPGRADE_INFO, INVENTORY_LIMIT} from './game.mjs';
 import {GameAudio} from './audio.mjs';
+import {scopedStorage} from './account-client.mjs';
+import {createAccountPanel} from './account-ui.mjs';
 import {weaponTrait} from './weapons.mjs';
 import {arsenalPanel,arsenalCatalog} from './arsenal-ui.mjs';
 import {loadGame, saveGame, SAVE_KEY} from './storage.mjs';
@@ -33,6 +35,8 @@ const endlessPending=()=>!!actor().endlessRun?.pending;
 
 let storage;
 try { storage = window.localStorage; } catch { storage = {getItem(){throw Error('Unavailable');},setItem(){throw Error('Unavailable');}}; }
+const rawStorage=storage;
+storage=scopedStorage(rawStorage);
 const loaded = loadGame(storage);
 let state = loaded.state, saveBlocked = loaded.blocked, selectedTab = 'growth', manualPause = false, soundOn = false;
 let dialogHandler = null, saveFailed = false, bossReportTimer;
@@ -112,6 +116,9 @@ scene.onCoins=()=>{
   }
 };
 const dialog = $('#dialog');
+const accountButton=document.createElement('button');accountButton.className='text-button';accountButton.id='account-button';accountButton.textContent='账号 / 云存档';document.querySelector('.nav-actions').prepend(accountButton);
+const cloudStatus=document.createElement('p');cloudStatus.id='cloud-status';cloudStatus.setAttribute('role','status');document.querySelector('.footer').after(cloudStatus);
+const account=createAccountPanel({raw:rawStorage,storage,persist,notify});accountButton.addEventListener('click',()=>account.open());
 const honor=createHonorBoard({storage,getScore:()=>scoreFromGame(state),getEndlessScore:()=>({waves:state.endless.bestWaves}),onOpen:closeDialog,onClose:updateHUD});
 const gameAudio = new GameAudio(undefined,()=>syncSound());
 function notify(message, error=false) {
@@ -464,7 +471,7 @@ function frame(now) {
   const delta=Math.min(.1,Math.max(0,(now-last)/1000));last=now;
   const today=localDate();if(today!==lastDailyDate){lastDailyDate=today;if(selectedTab==='challenges')renderPanel();}
   gameAudio.setPaused(document.hidden);gameAudio.tick();
-  const paused=manualPause||dialog.open||honor.isOpen()||document.hidden||endlessPending()||battleState(state).status!=='playing';
+  const paused=manualPause||dialog.open||honor.isOpen()||account.isOpen()||document.hidden||endlessPending()||battleState(state).status!=='playing';
   if(!paused)for(const event of advance(state,delta)) {
     scene.event(event);
     if(event.type==='shot')sound('shot',event.gun);

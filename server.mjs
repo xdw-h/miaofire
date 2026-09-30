@@ -9,6 +9,11 @@ const port = flag >= 0 ? Number(process.argv[flag + 1]) : 4173;
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('Port must be 1024–65535');
 const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.json':'application/json; charset=utf-8','.md':'text/plain; charset=utf-8'};
 const server = http.createServer(async (req, res) => {
+  const accountFlag=process.argv.indexOf('--account-port');
+  if(accountFlag>=0&&new URL(req.url,'http://localhost').pathname.startsWith('/api/account/')){
+    const upstream=http.request({hostname:'127.0.0.1',port:Number(process.argv[accountFlag+1]),path:req.url.slice('/api/account'.length),method:req.method,headers:req.headers},response=>{res.writeHead(response.statusCode,response.headers);response.pipe(res);});
+    upstream.on('error',()=>{res.writeHead(502,{'Content-Type':'application/json'});res.end('{"error":"本地账号服务未启动"}');});req.pipe(upstream);return;
+  }
   if (!['GET','HEAD'].includes(req.method)) {res.writeHead(405, {'Allow':'GET, HEAD'});res.end();return;}
   try {
     const requested = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);

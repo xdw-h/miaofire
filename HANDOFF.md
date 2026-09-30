@@ -1,5 +1,9 @@
 # 喵火前线接手开发说明
 
+## 账号与云存档更新（1.14.0）
+
+账号、云存档和游客绑定已上线。完整开发、API、备份和回滚说明见 [backend/accounts/README.md](backend/accounts/README.md)。账号数据库为 `/var/lib/miaofire-accounts/accounts.sqlite`，独立于原 MySQL 排行榜；服务为 `miaofire-accounts.service`，仅监听回环 4186。前端入口为 `src/account-ui.mjs`，存储隔离逻辑为 `src/account-client.mjs`。
+
 ## HTTPS 运维更新（2026-09-30）
 
 - 正式入口：<https://8.138.109.198:18080/>。证书为 Let's Encrypt 免费 IP 短期证书。

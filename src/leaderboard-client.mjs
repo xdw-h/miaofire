@@ -5,7 +5,7 @@ function newToken(){return [...crypto.getRandomValues(new Uint8Array(32))].map(n
 const validEndless=s=>!!s&&Number.isInteger(s.waves)&&s.waves>0&&s.waves<=99999;
 const higher=(a,b,endless=false)=>!a?b:!b?a:(endless?b.waves>a.waves:b.stage>a.stage||b.stage===a.stage&&b.waves>a.waves)?b:a;
 function validateEntry(row,valid){return !!row&&typeof row.id==='string'&&row.id.length<80&&!!cleanNickname(row.nickname)&&valid(row)&&Number.isInteger(row.rank)&&row.rank>=1&&Number.isSafeInteger(row.achievedAt)&&row.achievedAt>0;}
-export function createLeaderboardClient({storage,api='',board='main',fetcher=globalThis.fetch.bind(globalThis),timeout=10000}){
+export function createLeaderboardClient({storage,api='',board='main',fetcher=globalThis.fetch.bind(globalThis),timeout=10000,pageUrl=globalThis.location?.href}){
  const endless=board==='endless',valid=endless?validEndless:validScore,bestKey=endless?'endlessBest':'best',listPath=endless?'/endless-leaderboard':'/leaderboard';
  let profile,persistent=true,controller;
  try{profile=JSON.parse(storage.getItem(HONOR_KEY)||'null');}catch{persistent=false;}
@@ -23,7 +23,7 @@ export function createLeaderboardClient({storage,api='',board='main',fetcher=glo
  }catch{persistent=false;}return persistent;}
  save();
  function remember(score){if(valid(score)&&higher(profile[bestKey],score,endless)===score){profile[bestKey]=endless?{waves:score.waves}:{stage:score.stage,waves:score.waves};save();}return profile[bestKey]?{...profile[bestKey]}:null;}
- let base='';try{const u=new URL(api);if((u.protocol==='https:'||u.protocol==='http:'&&['localhost','127.0.0.1'].includes(u.hostname))&&!u.username&&!u.password&&!u.search&&!u.hash)base=u.href.replace(/\/$/,'');}catch{}
+ let base='';try{if(api){const u=new URL(api,pageUrl);if((u.protocol==='https:'||u.protocol==='http:'&&['localhost','127.0.0.1'].includes(u.hostname))&&!u.username&&!u.password&&!u.search&&!u.hash)base=u.href.replace(/\/$/,'');}}catch{}
  async function request(path,data){
   if(!base)throw Error('荣誉榜尚未开放，请稍后再来。游戏进度不受影响。');
   controller?.abort();const current=new AbortController();controller=current;
@@ -32,6 +32,7 @@ export function createLeaderboardClient({storage,api='',board='main',fetcher=glo
    const result=await fetcher(base+path,{method:data?'POST':'GET',headers:{Authorization:`Bearer ${profile.token}`,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),signal:current.signal,cache:'no-store',credentials:'omit'});
    let value;try{value=await result.json();}catch{throw Error('荣誉榜返回异常，请稍后重试。');}
    if(!result.ok)throw Error(typeof value?.error==='string'?value.error:'荣誉榜暂时无法访问，请稍后重试。');
+   if(data&&value?.ok===true&&value.mine===undefined)return await request(listPath);
    if(path===listPath&&(!Array.isArray(value.entries)||value.entries.length>100||!value.entries.every(row=>validateEntry(row,valid))))throw Error('荣誉榜数据异常，请稍后重试。');
    if(value.mine!==null&&!validateEntry(value.mine,valid))throw Error('个人排名数据异常，请稍后重试。');
    if(value.mine)remember(value.mine);
