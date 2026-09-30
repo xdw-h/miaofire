@@ -1,10 +1,10 @@
 {
   "name": "miaofire-honor",
   "main": "worker.mjs",
-  "compatibility_date": "2026-09-01",
+  "compatibility_date": "2026-09-30",
   "workers_dev": true,
   "vars": { "ALLOWED_ORIGINS": "https://xdw-h.github.io" },
   "d1_databases": [
-    { "binding": "DB", "database_name": "miaofire-honor", "database_id": "SET_BY_DEPLOY_SCRIPT" }
+    { "binding": "DB", "database_name": "miaofire-honor", "database_id": "4857d90e-1627-42c7-8d3f-0b9bdae3a3a9" }
   ]
 }

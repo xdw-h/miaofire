@@ -1,6 +1,8 @@
 # 荣誉榜服务部署
 
-状态：代码及本地共享服务已实现，生产服务需要项目所有者的 Cloudflare 账号。GitHub Pages 只托管游戏页面，不能作为多人战绩数据库。不要在前端放管理令牌或数据库密钥。
+状态：生产服务已部署至 `https://miaofire-honor.dawei520lily.workers.dev`，D1 数据库 `miaofire-honor` 已绑定。GitHub Pages 托管游戏页面，Cloudflare 保存共享战绩。不要在前端放管理令牌或数据库密钥。
+
+首次发布通过 Cloudflare 控制台完成，未在本机授权 Wrangler。后续可继续通过控制台更新，或由账号所有者授权官方 CLI 后按下面的流程发布。`RATE_LIMIT_SALT` 已在云端加密保存；不要重复创建数据库或重置它。
 
 ## 部署顺序
 
