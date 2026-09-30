@@ -13,6 +13,8 @@ import {dailyDefaults,dailyInfo,dailyAvailable,DAILY_RULES} from './daily.mjs';
 import {endlessDefaults,recordEndless} from './endless.mjs';
 import {BOUNTIES,bountyDefaults,bountyReward,tickBountyShield} from './bounties.mjs';
 import {castPetSkill as castCompanionSkill,evolutionDefaults,petSkillEffects,tickPetSkill} from './evolutions.mjs';
+import {routeDefaults,routeChoices,routeNode} from './routes.mjs';
+export {routeDefaults,routeChoices,routeNode} from './routes.mjs';
 export {chooseEndless} from './endless.mjs';
 export {TYPES} from './weapons.mjs';
 export {defenseStats} from './survival.mjs';
@@ -37,6 +39,7 @@ export function createGame() {
     daily:dailyDefaults(),
     endless:endlessDefaults(),
     bounties:bountyDefaults(),
+    routes:routeDefaults(),
     expedition:expeditionDefaults(),combat:combatDefaults(),skills:skillDefaults(),
     level: 1, bestThisRun: 0, bestEver: 0, coins: 0, gems: 30, crystals: 0,
     upgrades: {attack: 0, speed: 0, income: 0,health:0,shield:0}, workshop:{parts:0},
@@ -202,6 +205,34 @@ export function startDaily(s,date=new Date()){
   s.challenge={kind:'daily',date:info.date,rule:info.rule,target:info.target,run,status:'playing',reward:0,gemsReward:0};
   return ok(`开始每日挑战：${info.name}`);
 }
+export function startExpedition(s){
+  if(s.challenge)return fail('已有挑战进行中');
+  if(s.expedition?.pending)return fail('请先选择远征祝福');
+  if(s.bestEver<12)return fail('通过第 12 关后解锁分岔远征');
+  const run=structuredClone(s);run.challenge=null;run.level=12;run.coins=0;run.fish=0;run.gems=0;run.routes=routeDefaults();
+  run.expeditionRun={nodeType:null,nodeId:null,nodeKills:0,targetKills:0,coins:30,hp:100,shield:60,opened:false,paid:false};
+  restartBattle(run);run.hp=targetHealth(run);
+  s.challenge={kind:'expedition',run,route:{layer:0,nodeType:null,nodeId:null,nodeKills:0,targetKills:0,coins:30,hp:run.survival.hp,shield:run.survival.shield,opened:false,paid:false},status:'route'};
+  return ok('分岔远征开始，选择第一层路线');
+}
+export function chooseRoute(s,id){
+  const ch=s.challenge;
+  if(!ch||ch.kind!=='expedition')return fail('当前没有远征');
+  if(ch.status!=='route')return fail('当前节点尚未结束');
+  const node=routeNode(ch.route.layer,id);if(!node)return fail('这条路线不存在');
+  ch.route={...ch.route,nodeType:node.type,nodeId:node.id,nodeKills:0,targetKills:node.targetKills,opened:false,paid:false};ch.status=node.type==='chest'||node.type==='shop'||node.type==='rest'?'route-action':'playing';
+  ch.run.expeditionRun={...ch.run.expeditionRun,nodeType:node.type,nodeId:node.id,nodeKills:0,targetKills:node.targetKills,opened:false,paid:false};
+  return ok(`进入${node.name}`);
+}
+export function routeAction(s,action){
+  const ch=s.challenge;if(!ch||ch.kind!=='expedition'||ch.status!=='route-action')return fail('当前节点不可操作');
+  const r=ch.route;
+  if(action==='open'&&r.nodeType==='chest'){if(r.opened)return fail('宝箱已经打开');r.opened=true;r.coins+=24;ch.status='route';return ok('宝箱获得 24 枚远征币');}
+  if(action==='buy-shield'&&r.nodeType==='shop'){if(r.paid||r.coins<15)return fail(r.paid?'商品已经购买':'远征币不足');r.coins-=15;r.shield=Math.min(120,r.shield+60);r.paid=true;ch.status='route';return ok('购买护盾补给');}
+  if(action==='rest'&&r.nodeType==='rest'){if(r.opened)return fail('已经休息过');r.hp=Math.min(140,r.hp+45);r.shield=Math.min(120,r.shield+30);r.opened=true;ch.status='route';return ok('生命与护盾已恢复');}
+  return fail('当前操作不可用');
+}
+export function exitExpedition(s){if(!s.challenge||s.challenge.kind!=='expedition')return fail('没有正在进行的远征');s.challenge=null;return ok('已退出远征，远征资源作废');}
 export function targetId(s){return s.challenge?.run?targetId(s.challenge.run):s.challenge?`challenge-${s.challenge.tier}`:`${s.endlessRun?'endless':s.dailyRule?'daily':'tree'}-${s.totalKills}`;}
 export function battleState(s){return s.challenge?.run?s.challenge.run:s.challenge||s;}
 export function currentEnemy(s){return s.challenge?.run?currentEnemy(s.challenge.run):s.challenge?{kind:'dummy',name:'训练木偶',label:'精英目标',level:s.level,armor:0,coinMultiplier:0,hp:CHALLENGES[s.challenge.tier].hp}:encounterFor(s);}
@@ -249,6 +280,12 @@ export function advance(s, delta) {
       if(ch.status==='won'&&dailyAvailable(s,ch.date)){ch.reward=40;ch.gemsReward=20;s.fish=bounded(s.fish+40);s.gems=bounded(s.gems+20);s.daily.lastClaimed=ch.date;}
       events.push({type:'challenge-result',won:ch.status==='won',reward:ch.reward,gemsReward:ch.gemsReward});
     }
+    return events;
+  }
+  if(s.challenge?.kind==='expedition'){
+    const ch=s.challenge;if(ch.status!=='playing')return [];
+    const events=advance(ch.run,delta);ch.route.nodeKills=ch.run.kills;
+    if(ch.route.nodeKills>=ch.route.targetKills){ch.status='route';ch.route.nodeKills=ch.route.targetKills;ch.route.coins+=routeNode(ch.route.layer,ch.route.nodeId)?.reward??0;events.push({type:'route-node-complete',layer:ch.route.layer,nodeId:ch.route.nodeId});if(ch.route.layer>=2){ch.status='won';s.routes.clears++;s.routes.best=Math.max(s.routes.best,s.routes.clears);events.push({type:'challenge-result',won:true,reward:ch.route.coins});}else{ch.route.layer++;ch.route.nodeType=null;ch.route.nodeId=null;ch.route.targetKills=0;}}
     return events;
   }
   const events = [];

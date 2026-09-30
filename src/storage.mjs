@@ -4,6 +4,7 @@ import {defenseStats} from './survival.mjs';
 import {expeditionDefaults,offerBlessing,validateExpedition} from './blessings.mjs';
 import {dailyDefaults,validDate} from './daily.mjs';
 import {BOUNTIES,bountyDefaults} from './bounties.mjs';
+import {routeDefaults} from './routes.mjs';
 export const SAVE_KEY = 'miaofire.save.v1';
 const numeric = (n, max = 1e150) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
 const integer = (n, max) => numeric(n, max) && Number.isInteger(n);
@@ -113,6 +114,7 @@ export function loadGame(storage) {
       for(const weapon of state.inventory){delete weapon.mods;delete weapon.activeMod;}
     }
     state.bounties??=bountyDefaults();
+    state.routes??=routeDefaults();
     restartBattle(state);
     if(parsed.version<6){
       try{
