@@ -1,5 +1,16 @@
 # 喵火前线接手开发说明
 
+## HTTPS 运维更新（2026-09-30）
+
+- 正式入口：<https://8.138.109.198:18080/>。证书为 Let's Encrypt 免费 IP 短期证书。
+- Certbot 5.8.0 通过 Docker 运行；证书目录为 `/etc/letsencrypt/live/8.138.109.198/`，私钥不得复制到 Git。
+- `miaofire-cert-renew.timer` 每 12 小时检查续期，随机延迟最多 30 分钟；启用了开机补执行。
+- 续期脚本：`/usr/local/sbin/miaofire-cert-renew`，成功后检查并重载 Nginx。
+- 查看状态：`systemctl status miaofire-cert-renew.timer`；查看日志：`journalctl -u miaofire-cert-renew.service`。
+- 保留公网 80 端口供 HTTP-01 验证使用，验证目录为 `/www/wwwroot/miaofire/.well-known/acme-challenge/`；其他 80 端口请求跳转 HTTPS。
+- 配置回滚备份：`/www/server/panel/vhost/nginx/sub2api.conf.pre-https-20260930`。恢复后须执行 `nginx -t && nginx -s reload`。
+- HTTP 与 HTTPS 的浏览器存档相互隔离，旧 HTTP 存档不会自动迁移。
+
 ## Git 代码位置
 
 - 仓库：[https://github.com/xdw-h/miaofire](https://github.com/xdw-h/miaofire)
