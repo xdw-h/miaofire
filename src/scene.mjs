@@ -43,6 +43,7 @@ export class ForestScene {
     }
     if(event.type==='enemy-heal')this.particles.push({type:'shield-charge',x:750,y:g-230,text:`再生 +${compact(event.amount)}`,life:0,duration:.8});
     if(event.type==='bounty-shield')this.particles.push({type:'shield-charge',x:750,y:g-230,text:`护盾 +${event.amount}`,life:0,duration:1});
+    if(event.type==='pet-skill')this.particles.push({type:'pet-skill',x:390,y:g-90,text:event.branch==='attack'?'爆发射击':'守护月环',life:0,duration:1.1});
     if(event.type==='poison-tick'){this.teamHit=.5;this.particles.push({type:'number',x:270,y:g-120,text:`毒伤 −${event.damage}`,life:0,duration:.8});}
     if (event.type === 'shot') {
       this.targetLevel??=event.targetLevel;
@@ -142,6 +143,8 @@ export class ForestScene {
       } else if(p.type==='shield-charge') {
         c.globalAlpha=1-u*u;c.strokeStyle='#9ce3df';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y+50,22+(this.reduceMotion?0:u*18),0,Math.PI*2);c.stroke();
         c.font='bold 19px "Microsoft YaHei",sans-serif';c.textAlign='center';c.lineWidth=4;c.strokeStyle='#f4ffed';c.strokeText(p.text,p.x,p.y-(this.reduceMotion?0:u*20));c.fillStyle='#347f87';c.fillText(p.text,p.x,p.y-(this.reduceMotion?0:u*20));
+      } else if(p.type==='pet-skill') {
+        c.globalAlpha=1-u;c.textAlign='center';c.font='800 17px "Microsoft YaHei",sans-serif';c.lineWidth=4;c.strokeStyle='#fffce6';c.strokeText(p.text,p.x,p.y-u*45);c.fillStyle='#8c6ca7';c.fillText(p.text,p.x,p.y-u*45);c.strokeStyle='#d7b5ff';c.lineWidth=3;c.beginPath();c.arc(p.x,p.y+8,26+u*26,0,Math.PI*2);c.stroke();
       } else if(p.type==='number'||p.type==='coins') {
         c.globalAlpha=1-u*u;c.font=`800 ${p.type==='coins'?23:20}px "Segoe UI","Microsoft YaHei",sans-serif`;
         c.textAlign='center';c.lineWidth=4;c.strokeStyle=p.type==='coins'?'#fff5d2':'#f8f7dccc';

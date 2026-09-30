@@ -1,6 +1,7 @@
 import {encounterFor} from './enemies.mjs';
 import {blessingCount} from './blessings.mjs';
 import {tickBountyPoison} from './bounties.mjs';
+import {petBonus} from './progression.mjs';
 export const BOSS_CYCLE=5, BOSS_WINDUP=2, SHIELD_DELAY=3, SHIELD_REGEN=8;
 export function shieldRecovery(s){return s.dailyRule==='drought'?0:s.level<3?SHIELD_REGEN:4;}
 export function defenseStats(s){if(s.challenge?.run)return defenseStats(s.challenge.run);return {maxHp:100+20*s.upgrades.health,maxShield:60+15*s.upgrades.shield+15*blessingCount({...s,challenge:null},'barrier')};}
@@ -8,15 +9,19 @@ export function resetSurvival(s){const d=defenseStats(s);s.survival={hp:d.maxHp,
 // Retain bossTime in v3 saves; it now tracks the current enemy's attack clock.
 export function resetEnemyAttack(s){s.survival.bossTime=0;s.survival.enemyStrikes=0;}
 export function bossDamage(level){return 40+8*Math.max(0,Math.floor(level/5)-1);}
+function damageMultiplier(s){
+ const guardian=s.petEvolution?.[s.activePet]==='guardian'&&s.petSkillDuration?.[s.activePet]>0 ? .25 : 0;
+ return Math.max(.25,1-Math.min(.65,petBonus(s).defense+guardian));
+}
 export function enemyAttack(s){
  if(s.challenge?.run)return enemyAttack(s.challenge.run);
  if(s.challenge)return null;
  const enemy=encounterFor(s),boss=enemy.kind==='boss',enraged=boss&&s.hp<=enemy.hp*.5;
- if(s.bountyRun){const heavy=s.bountyRun.id==='berserker';return {enemy,boss:true,enraged,cycle:s.survival.enemyStrikes?6:4,windup:heavy?3:2,damage:heavy?60*(enraged?2:1):s.bountyRun.id==='toxic'?24:38};}
+ if(s.bountyRun){const heavy=s.bountyRun.id==='berserker';const raw=heavy?60*(enraged?2:1):s.bountyRun.id==='toxic'?24:38;return {enemy,boss:true,enraged,cycle:s.survival.enemyStrikes?6:4,windup:heavy?3:2,damage:Math.ceil(raw*damageMultiplier(s))};}
  const regularDamage=s.level<3?4:6+Math.floor((s.level-3)*.9);
  const repeat=(s.level<3?4:s.level<8?3.5:3)*(enemy.elite==='fury'?.8:1);
- return {enemy,boss,enraged,cycle:boss?(s.survival.enemyStrikes?BOSS_CYCLE:3):s.survival.enemyStrikes?repeat:1,windup:boss?BOSS_WINDUP:1,
-  damage:boss?Math.ceil(bossDamage(s.level)*(enraged?1.4:1)):Math.ceil((regularDamage+(enemy.kind==='armored'?6:0))*(enemy.elite==='fury'?1.3:1))};
+ const raw= boss?bossDamage(s.level)*(enraged?1.4:1):(regularDamage+(enemy.kind==='armored'?6:0))*(enemy.elite==='fury'?1.3:1);
+ return {enemy,boss,enraged,cycle:boss?(s.survival.enemyStrikes?BOSS_CYCLE:3):s.survival.enemyStrikes?repeat:1,windup:boss?BOSS_WINDUP:1,damage:Math.ceil(raw*damageMultiplier(s))};
 }
 export function enemyCharging(s){if(s.challenge?.run)return enemyCharging(s.challenge.run);const a=enemyAttack(s);return !!a&&s.status==='playing'&&!s.endlessRun?.pending&&s.survival.bossTime>=a.cycle-a.windup-1e-8;}
 export function bossCharging(s){return enemyAttack(s)?.boss===true&&enemyCharging(s);}
@@ -28,7 +33,9 @@ export function advanceSurvival(s,dt){
  events.push(...tickBountyPoison(s,dt));if(s.status!=='playing')return events;
  const recovery=Math.max(0,dt-Math.max(0,SHIELD_DELAY-v.damageAgo));
  v.damageAgo=Math.min(SHIELD_DELAY,v.damageAgo+dt);
- v.shield=Math.min(d.maxShield,v.shield+shieldRecovery(s)*recovery);
+  const partnerRecovery=petBonus(s).recovery*recovery;
+  v.shield=Math.min(d.maxShield,v.shield+shieldRecovery(s)*recovery+partnerRecovery);
+  v.hp=Math.min(d.maxHp,v.hp+partnerRecovery);
  const attack=enemyAttack(s),{cycle,windup,damage,enemy,boss}=attack;
  const before=v.bossTime;v.bossTime+=dt;
  if((before<cycle-windup-1e-8||before===0&&cycle===windup)&&v.bossTime>=cycle-windup-1e-8)events.push({type:boss?'boss-charge':'enemy-charge',damage});

@@ -1,5 +1,5 @@
 import {createGame, restartBattle, TYPES, UPGRADE_INFO, INVENTORY_LIMIT} from './game.mjs';
-import {PETS,MILESTONES,progressionDefaults} from './progression.mjs';
+import {PETS,PET_IDS,MILESTONES,progressionDefaults} from './progression.mjs';
 import {defenseStats} from './survival.mjs';
 import {expeditionDefaults,offerBlessing,validateExpedition} from './blessings.mjs';
 import {dailyDefaults,validDate} from './daily.mjs';
@@ -8,6 +8,7 @@ export const SAVE_KEY = 'miaofire.save.v1';
 const numeric = (n, max = 1e150) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
 const integer = (n, max) => numeric(n, max) && Number.isInteger(n);
 const MODIFICATION_IDS = new Set(['pierce', 'ricochet', 'burn']);
+const LEGACY_PET_IDS = new Set(['squirrel','bird','raccoon']);
 const record = value => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -51,7 +52,13 @@ export function validateState(s,version=6) {
   if (!['playing', 'failed'].includes(s.status)) return false;
   if(version>=2){
     if(!integer(s.fish)||!s.pets||typeof s.pets!=='object')return false;
-    if(!Object.entries(PETS).every(([id,p])=>integer(s.pets[id],20)&&(!s.pets[id]||s.bestEver>=p.unlock)))return false;
+    if(!Object.entries(PETS).every(([id,p])=>s.pets[id]===undefined&& !LEGACY_PET_IDS.has(id)||integer(s.pets[id],20)&&(!s.pets[id]||s.bestEver>=p.unlock)))return false;
+    for(const id of PET_IDS){
+      if(s.petEvolution!==undefined&&(!record(s.petEvolution)||s.petEvolution[id]!==undefined&&!['attack','guardian',null].includes(s.petEvolution[id])))return false;
+      if(s.petSkillCooldown!==undefined&&(!record(s.petSkillCooldown)||s.petSkillCooldown[id]!==undefined&&!numeric(s.petSkillCooldown[id],28)))return false;
+      if(s.petSkillDuration!==undefined&&(!record(s.petSkillDuration)||s.petSkillDuration[id]!==undefined&&!numeric(s.petSkillDuration[id],5)))return false;
+      if(s.petEvolution?.[id]&&(!s.pets[id]||s.pets[id]<10))return false;
+    }
     if(s.activePet!==null&&(!Object.hasOwn(PETS,s.activePet)||!s.pets[s.activePet]))return false;
     if(!Array.isArray(s.claimedMilestones)||new Set(s.claimedMilestones).size!==s.claimedMilestones.length)return false;
     if(!s.claimedMilestones.every(id=>MILESTONES.some(m=>m.id===id&&s[m.field]>=m.target)))return false;
@@ -73,7 +80,10 @@ export function validateState(s,version=6) {
 
 export function saveGame(storage, state) {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify({version: 6, state:{...state, workshop: state.workshop === undefined ? {parts: 0} : state.workshop, challenge:null}}));
+    const defaults=progressionDefaults(),pets={...state.pets};
+    for(const id of PET_IDS)if(!LEGACY_PET_IDS.has(id)&&!(pets[id]>0))delete pets[id];
+    const saved={...state, pets, petEvolution:{...defaults.petEvolution,...state.petEvolution}, petSkillCooldown:{...defaults.petSkillCooldown,...state.petSkillCooldown}, petSkillDuration:{...defaults.petSkillDuration,...state.petSkillDuration}, workshop: state.workshop === undefined ? {parts: 0} : state.workshop, challenge:null};
+    storage.setItem(SAVE_KEY, JSON.stringify({version: 6, state:saved}));
     return {ok: true};
   } catch {
     return {ok: false, warning: '浏览器无法保存进度。本次仍可试玩，请不要关闭页面。'};
@@ -88,7 +98,12 @@ export function loadGame(storage) {
   try {
     const parsed = JSON.parse(raw);
     if (![1,2,3,4,5,6].includes(parsed.version) || !validateState(parsed.state,parsed.version)) throw new Error('Invalid save');
-    const state = parsed.version===1?{...parsed.state,...progressionDefaults()}:parsed.state;
+    const defaults=progressionDefaults();
+    const state = parsed.version===1?{...defaults,...parsed.state}:parsed.state;
+    if(parsed.version===1&&!Object.hasOwn(parsed.state,'pets'))state.pets={squirrel:0,bird:0,raccoon:0};
+    state.petEvolution={...defaults.petEvolution,...state.petEvolution};
+    state.petSkillCooldown={...defaults.petSkillCooldown,...state.petSkillCooldown};
+    state.petSkillDuration={...defaults.petSkillDuration,...state.petSkillDuration};
     if(parsed.version<3)state.upgrades={...state.upgrades,health:0,shield:0};
     if(parsed.version<4){state.daily=dailyDefaults();state.expedition=expeditionDefaults();offerBlessing(state,Math.floor(state.bestThisRun/3)*3);}
     if(parsed.version<5)state.endless={bestWaves:0};

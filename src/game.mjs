@@ -12,6 +12,7 @@ import {SKILLS,skillDefaults,tickSkills} from './skills.mjs';
 import {dailyDefaults,dailyInfo,dailyAvailable,DAILY_RULES} from './daily.mjs';
 import {endlessDefaults,recordEndless} from './endless.mjs';
 import {BOUNTIES,bountyDefaults,bountyReward,tickBountyShield} from './bounties.mjs';
+import {castPetSkill as castCompanionSkill,evolutionDefaults,petSkillEffects,tickPetSkill} from './evolutions.mjs';
 export {chooseEndless} from './endless.mjs';
 export {TYPES} from './weapons.mjs';
 export {defenseStats} from './survival.mjs';
@@ -56,13 +57,14 @@ export function weaponPower(s, weapon) {
 }
 export function stats(s) {
   if(s.challenge?.run)return stats(s.challenge.run);
+  const bonus=petBonus(s);
   const cats = s.equipment.map(id => {
     const weapon = s.inventory.find(w => w.id === id);
     return weapon ? {...weapon, ...weaponPower(s, weapon)} : null;
   });
   return {cats, dps: cats.reduce((sum, cat) => sum + (cat?.dps || 0), 0),
-    income: (1 + s.upgrades.income * 0.16)*petBonus(s).income, attack: 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*petBonus(s).attack*(1+.08*blessingCount(s,'attack')),
-    speed: (1 + s.upgrades.speed * 0.07)*petBonus(s).speed*(1+.05*blessingCount(s,'speed'))};
+    income: (1 + s.upgrades.income * 0.16)*bonus.income, attack: 1.22 ** s.upgrades.attack * (1 + s.crystals * 0.1)*bonus.attack*(1+.08*blessingCount(s,'attack')),
+    speed: (1 + s.upgrades.speed * 0.07)*bonus.speed*(1+.05*blessingCount(s,'speed')), defense:bonus.defense, recovery:bonus.recovery, boss:bonus.boss};
 }
 export function upgradeCost(s, kind) {
   const info = UPGRADE_INFO[kind];
@@ -163,7 +165,7 @@ export function startChallenge(s,tier){
   if(s.bestEver<3)return fail('通过第 3 关后开放挑战');
   if(!Number.isInteger(tier)||!CHALLENGES[tier]||tier>s.challengeClears)return fail('请先通过上一档挑战');
   if(!s.equipment.some(Boolean))return fail('请先装备至少一把武器');
-  s.challenge={tier,hp:CHALLENGES[tier].hp,elapsed:0,cooldowns:[0,0,0],accumulator:0,status:'playing',reward:0,combat:combatDefaults(),skills:skillDefaults()};
+  s.challenge={tier,hp:CHALLENGES[tier].hp,elapsed:0,cooldowns:[0,0,0],accumulator:0,status:'playing',reward:0,combat:combatDefaults(),skills:skillDefaults(),activePet:null,...evolutionDefaults()};
   return ok(`开始${CHALLENGES[tier].name}，限时 30 秒`);
 }
 export function exitChallenge(s){if(!s.challenge)return fail('没有正在进行的挑战');recordEndless(s);s.challenge=null;return ok('已返回主线，继续之前的冒险');}
@@ -218,6 +220,8 @@ export function castSkill(s,id){
   b.skills.cooldowns[id]=skill.cooldown;return ok(`${skill.name}已释放`);
 }
 
+export const castPetSkill = castCompanionSkill;
+
 // Fixed simulation steps make gameplay identical on 30/60/120 Hz displays.
 export function advance(s, delta) {
   if(s.challenge?.kind==='bounty'){
@@ -263,6 +267,7 @@ export function advance(s, delta) {
     syncEncounter(battle,targetId(s),currentEnemy(s));
     events.push(...tickBountyShield(s,STEP));
     tickSkills(battle,STEP);
+    if(!s.challenge||s.challenge.run)tickPetSkill(battle,STEP);
     const healed=tickCombat(battle,STEP,currentEnemy(s));
     if(healed)events.push({type:'enemy-heal',amount:healed,targetId:targetId(s)});
     if (battle.combat?.pendingEvents?.length) {
@@ -277,7 +282,7 @@ export function advance(s, delta) {
       if (battle.cooldowns[slot] > 1e-9) continue;
       battle.cooldowns[slot] += 1 / cat.rate;
       const enemy=currentEnemy(s);
-      const boost=(enemy.kind==='boss'?1+.12*blessingCount(s,'hunter'):1)*(!s.challenge&&s.survival.hp<=defenseStats(s).maxHp*.35?1+.2*blessingCount(s,'courage'):1);
+      const boost=(enemy.kind==='boss'?(1+.12*blessingCount(s,'hunter'))*(1+petBonus(s).boss):1)*(!s.challenge&&s.survival.hp<=defenseStats(s).maxHp*.35?1+.2*blessingCount(s,'courage'):1)*petSkillEffects(s).offense;
       syncEncounter(battle,targetId(s),enemy);
       const targetKey=targetId(s);
       let ricochetKilled = false;
